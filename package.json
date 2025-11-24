@@ -1,0 +1,37 @@
+{
+  "name": "ros-visualization-web",
+  "version": "1.0.0",
+  "description": "ROS visualization tool with 3D rendering, state info, image display, and topic publishing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "vue-router": "^4.2.5",
+    "pinia": "^2.1.7",
+    "three": "^0.160.0",
+    "@types/three": "^0.160.0",
+    "roslib": "^1.3.0",
+    "element-plus": "^2.5.0",
+    "@element-plus/icons-vue": "^2.3.1",
+    "lodash-es": "^4.17.21",
+    "@types/lodash-es": "^4.17.12"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "@vue/tsconfig": "^0.5.0",
+    "typescript": "~5.3.0",
+    "vite": "^5.0.0",
+    "vue-tsc": "^1.8.27",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "eslint-plugin-vue": "^9.20.0",
+    "@types/node": "^20.11.0"
+  }
+}
