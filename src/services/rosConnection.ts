@@ -21,6 +21,7 @@ class RosConnection {
   private subscribers = new Map<string, any>()
   private publishers = new Map<string, any>()
   private connectionCallbacks: ((connected: boolean) => void)[] = []
+  private disconnectCallbacks: (() => void)[] = []
 
   /**
    * 连接到ROS Bridge服务器
@@ -29,23 +30,41 @@ class RosConnection {
     const lib = await loadRoslib()
 
     return new Promise((resolve, reject) => {
+      // 设置连接超时（15秒）
+      const timeout = setTimeout(() => {
+        if (this.ros) {
+          this.ros.close()
+          this.ros = null
+        }
+        reject(new Error('连接超时：无法在15秒内连接到服务器，请检查网络和服务器状态'))
+      }, 15000)
+
       this.ros = new lib.Ros({
         url: config.url
       })
 
       this.ros.on('connection', () => {
+        clearTimeout(timeout)
         this.notifyConnectionChange(true)
         resolve()
       })
 
-      this.ros.on('error', (error: Error) => {
+      this.ros.on('error', (error: any) => {
+        clearTimeout(timeout)
         console.error('ROS connection error:', error)
         this.notifyConnectionChange(false)
-        reject(error)
+        // WebSocket 错误事件返回的是 Event 对象，需要转换为 Error
+        const errorMsg =
+          error instanceof Error
+            ? error
+            : new Error('WebSocket 连接失败：无法连接到服务器，请检查网络和 rosbridge_server 状态')
+        reject(errorMsg)
       })
 
       this.ros.on('close', () => {
+        clearTimeout(timeout)
         this.notifyConnectionChange(false)
+        this.notifyDisconnect()
       })
     })
   }
@@ -206,8 +225,29 @@ class RosConnection {
     this.connectionCallbacks.push(callback)
   }
 
+  /**
+   * 注册断连回调
+   */
+  onDisconnect(callback: () => void): void {
+    this.disconnectCallbacks.push(callback)
+  }
+
+  /**
+   * 移除断连回调
+   */
+  offDisconnect(callback: () => void): void {
+    const index = this.disconnectCallbacks.indexOf(callback)
+    if (index > -1) {
+      this.disconnectCallbacks.splice(index, 1)
+    }
+  }
+
   private notifyConnectionChange(connected: boolean): void {
     this.connectionCallbacks.forEach((cb) => cb(connected))
+  }
+
+  private notifyDisconnect(): void {
+    this.disconnectCallbacks.forEach((cb) => cb())
   }
 }
 

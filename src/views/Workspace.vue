@@ -83,6 +83,50 @@
             </div>
         </div>
 
+        <!-- 断连警告弹窗 -->
+        <el-dialog v-model="disconnectWarningVisible" title="连接断开" width="400px" :close-on-click-modal="false"
+            :close-on-press-escape="false" :show-close="false">
+            <div class="disconnect-warning">
+                <el-icon :size="64" color="#F56C6C" style="margin-bottom: 16px;">
+                    <Connection />
+                </el-icon>
+                <h3 style="margin-bottom: 12px; color: #F56C6C;">机器狗连接已断开</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    与机器狗的 WebSocket 连接已断开，请检查网络连接或机器狗状态。
+                </p>
+                <div class="disconnect-info">
+                    <p style="font-size: 12px; color: #999;">
+                        断开时间: {{ disconnectTime }}
+                    </p>
+                </div>
+            </div>
+            <template #footer>
+                <el-button @click="handleDisconnectConfirm" type="primary">确认</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 断连警告弹窗 -->
+        <el-dialog v-model="disconnectWarningVisible" title="连接断开" width="400px" :close-on-click-modal="false"
+            :close-on-press-escape="false" :show-close="false">
+            <div class="disconnect-warning">
+                <el-icon :size="64" color="#F56C6C" style="margin-bottom: 16px;">
+                    <Connection />
+                </el-icon>
+                <h3 style="margin-bottom: 12px; color: #F56C6C;">机器狗连接已断开</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    与机器狗的 WebSocket 连接已断开，请检查网络连接或机器狗状态。
+                </p>
+                <div class="disconnect-info">
+                    <p style="font-size: 12px; color: #999;">
+                        断开时间: {{ disconnectTime }}
+                    </p>
+                </div>
+            </div>
+            <template #footer>
+                <el-button @click="handleDisconnectConfirm" type="primary">确认</el-button>
+            </template>
+        </el-dialog>
+
         <!-- AI Dialog -->
         <el-dialog v-model="aiDialogVisible" title="AI助手" width="600px">
             <div class="ai-dialog-content">
@@ -111,14 +155,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, provide } from 'vue'
-import { ElDialog, ElButton, ElIcon } from 'element-plus'
+import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
+import { ElDialog, ElButton, ElIcon, ElMessage } from 'element-plus'
 import { DataAnalysis, View, Position, Connection, TrendCharts } from '@element-plus/icons-vue'
 import ThreeDPanel from '@/components/panels/ThreeDPanel.vue'
 import ImagePanel from '@/components/panels/ImagePanel.vue'
 import RobotStatusPanel from '@/components/panels/RobotStatusPanel.vue'
 import ThreeDSettings from '@/components/settings/ThreeDSettings.vue'
 import ImageSettings from '@/components/settings/ImageSettings.vue'
+import { rosConnection } from '@/services/rosConnection'
+import { useRosStore } from '@/stores/ros'
 
 // 3D面板引用
 const threeDPanelRef = ref()
@@ -131,6 +177,51 @@ const selectedPanel = ref<'image' | '3d' | null>('image')
 
 // AI对话框状态
 const aiDialogVisible = ref(false)
+
+// 断连警告状态
+const disconnectWarningVisible = ref(false)
+const disconnectTime = ref('')
+const rosStore = useRosStore()
+
+// 断连回调函数
+const handleDisconnect = () => {
+    // 先保存当前连接状态
+    const wasConnected = rosStore.isConnected
+
+    // 立即更新 store 状态
+    rosStore.setConnectionState({
+        connected: false,
+        connecting: false,
+        error: '连接已断开'
+    })
+
+    // 根据之前的连接状态决定是否显示警告
+    if (wasConnected) {
+        const now = new Date()
+        disconnectTime.value = now.toLocaleString('zh-CN')
+        disconnectWarningVisible.value = true
+
+        // 同时显示消息提示
+        ElMessage.error({
+            message: '机器狗连接已断开！',
+            duration: 5000,
+            showClose: true
+        })
+    }
+}// 确认断连警告
+const handleDisconnectConfirm = () => {
+    disconnectWarningVisible.value = false
+}
+
+// 组件挂载时注册断连监听
+onMounted(() => {
+    rosConnection.onDisconnect(handleDisconnect)
+})
+
+// 组件卸载时移除监听
+onUnmounted(() => {
+    rosConnection.offDisconnect(handleDisconnect)
+})
 
 // 面板引用
 const floatingPanelRef = ref<HTMLElement>()
@@ -455,6 +546,23 @@ const openAIDialog = () => {
     margin: 0;
     font-size: 13px;
     color: #666;
+}
+
+/* 断连警告样式 */
+.disconnect-warning {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 20px;
+}
+
+.disconnect-info {
+    background-color: #f5f5f5;
+    padding: 12px;
+    border-radius: 4px;
+    width: 100%;
+    margin-top: 12px;
 }
 
 /* 响应式调整 */

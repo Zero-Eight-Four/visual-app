@@ -224,8 +224,9 @@ const lastUpdateTime = ref<string>('--:--:--')
 const isConnected = computed(() => rosStore.isConnected)
 
 const handleDisconnect = () => {
-    rosConnection.disconnect()
+    // 主动断开前先更新状态，避免触发断连警告
     rosStore.setConnectionState({ connected: false, connecting: false })
+    rosConnection.disconnect()
     ElMessage.info('已断开连接')
     showConnectionDialog.value = true
 }

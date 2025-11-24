@@ -16,10 +16,6 @@
                     </el-option>
                 </el-select>
             </el-form-item>
-
-            <el-form-item label="自动重连" prop="autoReconnect">
-                <el-switch id="ros-auto-reconnect" v-model="form.autoReconnect" />
-            </el-form-item>
         </el-form>
 
         <template #footer>
@@ -294,11 +290,13 @@ const handleConnect = async () => {
     rosStore.setConnectionState({ connecting: true, error: null, url: urlValue })
 
     try {
+        console.log('正在连接到:', urlValue)
         await rosConnection.connect({
             url: urlValue,
             autoConnect: form.value.autoReconnect
         })
 
+        console.log('连接成功！')
         rosStore.setConnectionState({ connected: true, connecting: false })
 
         // 保存到连接历史(仅当不在历史记录中时)
@@ -322,13 +320,39 @@ const handleConnect = async () => {
         visible.value = false
         emit('connected')
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : '未知错误'
+        console.error('连接失败详情:', error)
+
+        // 处理不同类型的错误
+        let errorMessage = '未知错误'
+        if (error instanceof Error) {
+            errorMessage = error.message
+        } else if (error && typeof error === 'object' && 'type' in error) {
+            errorMessage = 'WebSocket 连接失败'
+        }
+
         rosStore.setConnectionState({
             connected: false,
             connecting: false,
             error: errorMessage
         })
-        ElMessage.error('连接失败: ' + errorMessage)
+
+        // 显示更详细的错误信息
+        const ip = urlValue.replace('ws://', '').split(':')[0]
+        let userMessage = ''
+
+        if (errorMessage.includes('超时')) {
+            userMessage = `连接超时！\n\n请检查：\n• 机器狗是否开机\n• IP ${ip} 是否正确\n• rosbridge_server 是否运行`
+        } else if (errorMessage.includes('WebSocket')) {
+            userMessage = `无法连接到 ${ip}:9090\n\n可能原因：\n• rosbridge_server 未启动\n• 防火墙阻止连接\n• 网络不通`
+        } else {
+            userMessage = `连接失败: ${errorMessage}`
+        }
+
+        ElMessage.error({
+            message: userMessage,
+            duration: 8000,
+            showClose: true
+        })
     } finally {
         connecting.value = false
     }
