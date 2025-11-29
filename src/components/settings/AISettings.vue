@@ -2,7 +2,9 @@
     <div class="settings-panel">
         <el-form label-position="top" size="small">
             <div class="settings-section">
-                <h4 class="section-title">AI识别设置</h4>
+                <h4 class="section-title">
+                    AI识别设置
+                </h4>
                 <div class="placeholder-info">
                     功能开发中...
                 </div>

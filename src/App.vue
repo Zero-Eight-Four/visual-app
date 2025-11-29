@@ -3,7 +3,26 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
+import { useRosStore } from '@/stores/ros'
+import { rosConnection } from '@/services/rosConnection'
+
 // App.vue 作为根组件，使用 RouterView 加载路由页面
+
+const rosStore = useRosStore()
+
+const handleConnectionChange = (connected: boolean) => {
+    rosStore.setConnectionState({ connected })
+}
+
+onMounted(() => {
+    rosConnection.onConnectionChange(handleConnectionChange)
+})
+
+onUnmounted(() => {
+    // rosConnection doesn't have offConnectionChange, but it's a singleton and App is root, so it's fine.
+    // Or I should add offConnectionChange to rosConnection.ts for correctness.
+})
 </script>
 
 <style>

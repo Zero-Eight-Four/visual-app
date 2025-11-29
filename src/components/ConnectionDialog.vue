@@ -2,19 +2,24 @@
     <el-dialog v-model="visible" title="连接到机器狗" width="500px" :close-on-click-modal="false">
         <el-form :model="form" label-width="100px">
             <el-form-item label="选择连接" prop="url">
-                <el-select id="ros-websocket-url" ref="selectRef" v-model="form.url" filterable allow-create
-                    placeholder="ws://localhost:9090" style="width: 100%" @change="onUrlChange"
-                    @keyup.enter="handleConnect">
-                    <el-option v-for="historyItem in connectionHistory" :key="historyItem.url" :label="historyItem.name"
-                        :value="historyItem.url">
-                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                            <span>{{ historyItem.name }}</span>
-                            <el-button size="small" text type="primary" @click.stop="editConnection(historyItem)">
-                                编辑
-                            </el-button>
-                        </div>
-                    </el-option>
-                </el-select>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <el-select id="ros-websocket-url" ref="selectRef" v-model="form.url" filterable placeholder="请选择连接"
+                        style="flex: 1;" @keyup.enter="handleConnect">
+                        <el-option v-for="historyItem in connectionHistory" :key="historyItem.url"
+                            :label="historyItem.name" :value="historyItem.url">
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                                <span>{{ historyItem.name }}</span>
+                                <el-button size="small" text type="primary" @click.stop="editConnection(historyItem)">
+                                    编辑
+                                </el-button>
+                            </div>
+                        </el-option>
+                    </el-select>
+                    <el-button type="primary" :icon="Plus" @click="showAddConnectionDialog" plain>
+                        新增连接
+                    </el-button>
+                </div>
             </el-form-item>
         </el-form>
 
@@ -22,17 +27,18 @@
             <el-button @click="visible = false">
                 取消
             </el-button>
-            <el-button type="primary" :loading="connecting" @click="handleConnect">
+            <el-button type="primary" :loading="connecting" @click="handleConnect" :disabled="!form.url">
                 连接
             </el-button>
         </template>
     </el-dialog>
 
-    <!-- 新连接名称输入对话框 -->
-    <el-dialog v-model="newConnectionDialogVisible" title="添加新连接" width="400px">
+    <!-- 新连接输入对话框 -->
+    <el-dialog v-model="newConnectionDialogVisible" title="添加新连接" width="400px" :close-on-click-modal="false">
         <el-form label-width="80px">
             <el-form-item label="连接地址">
-                <el-input v-model="newConnectionForm.url" placeholder="ws://192.168.1.100:9090" disabled />
+                <el-input v-model="newConnectionForm.url" placeholder="ws://192.168.1.100:9090"
+                    @keyup.enter="saveNewConnection" />
             </el-form-item>
             <el-form-item label="连接名称">
                 <el-input v-model="newConnectionForm.name" placeholder="例如: 机器狗1号" @keyup.enter="saveNewConnection" />
@@ -42,8 +48,9 @@
             <el-button @click="cancelNewConnection">
                 取消
             </el-button>
-            <el-button type="primary" @click="saveNewConnection">
-                保存并连接
+            <el-button type="primary" @click="saveNewConnection"
+                :disabled="!newConnectionForm.url || !newConnectionForm.name.trim()">
+                保存
             </el-button>
         </template>
     </el-dialog>
@@ -68,7 +75,8 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
-import { ElDialog, ElForm, ElFormItem, ElSelect, ElOption, ElSwitch, ElButton, ElMessage, ElInput } from 'element-plus'
+import { ElDialog, ElForm, ElFormItem, ElSelect, ElOption, ElButton, ElMessage, ElInput } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
 import { rosConnection } from '@/services/rosConnection'
 
@@ -215,27 +223,11 @@ const isValidWebSocketUrl = (url: string): boolean => {
     }
 }
 
-// 处理URL变化 - 当用户输入新地址时
-const onUrlChange = (value: string) => {
-    if (!value) return
-
-    // 检查是否是历史记录中的地址
-    const existing = connectionHistory.value.find(h => h.url === value)
-    if (existing) {
-        // 是历史记录中的地址，不需要额外操作
-        return
-    }
-
-    // 检查是否是有效的WebSocket URL
-    if (!isValidWebSocketUrl(value)) {
-        ElMessage.warning('请输入有效的WebSocket地址，例如: ws://192.168.1.100:9090')
-        return
-    }
-
-    // 是新地址，弹出名称输入对话框
+// 显示新增连接对话框
+const showAddConnectionDialog = () => {
     newConnectionForm.value = {
-        url: value,
-        name: extractNameFromUrl(value)
+        url: '',
+        name: ''
     }
     newConnectionDialogVisible.value = true
 }
@@ -243,25 +235,52 @@ const onUrlChange = (value: string) => {
 // 取消添加新连接
 const cancelNewConnection = () => {
     newConnectionDialogVisible.value = false
-    // 清空选择
-    form.value.url = ''
+    newConnectionForm.value = {
+        url: '',
+        name: ''
+    }
 }
 
-// 保存新连接并连接
-const saveNewConnection = async () => {
+// 保存新连接
+const saveNewConnection = () => {
+    if (!newConnectionForm.value.url.trim()) {
+        ElMessage.warning('请输入连接地址')
+        return
+    }
+
     if (!newConnectionForm.value.name.trim()) {
         ElMessage.warning('请输入连接名称')
         return
     }
 
-    // 先保存到历史记录，这样在设置 form.value.url 时不会触发 onUrlChange 弹出对话框
-    saveConnectionHistory(newConnectionForm.value.url, newConnectionForm.value.name)
+    // 验证URL格式
+    if (!isValidWebSocketUrl(newConnectionForm.value.url)) {
+        ElMessage.warning('请输入有效的WebSocket地址，例如: ws://192.168.1.100:9090')
+        return
+    }
 
+    // 检查是否已存在
+    const existing = connectionHistory.value.find(h => h.url === newConnectionForm.value.url)
+    if (existing) {
+        ElMessage.warning('该连接地址已存在')
+        return
+    }
+
+    // 如果没有输入名称，使用默认名称
+    if (!newConnectionForm.value.name.trim()) {
+        newConnectionForm.value.name = extractNameFromUrl(newConnectionForm.value.url)
+    }
+
+    // 保存到历史记录
+    saveConnectionHistory(newConnectionForm.value.url, newConnectionForm.value.name.trim())
+
+    // 自动选中新添加的连接
+    form.value.url = newConnectionForm.value.url
+
+    // 关闭对话框
     newConnectionDialogVisible.value = false
 
-    // 设置表单值并直接连接
-    form.value.url = newConnectionForm.value.url
-    await handleConnect()
+    ElMessage.success('连接已添加')
 }
 
 onMounted(() => {
@@ -315,8 +334,6 @@ const handleConnect = async () => {
         } catch (topicError) {
             // 即使获取话题失败，连接也是成功的
         }
-
-        ElMessage.success('成功连接到机器狗')
         visible.value = false
         emit('connected')
     } catch (error) {

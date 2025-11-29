@@ -4,22 +4,84 @@
             <span class="dot"></span>
             <span class="text">{{ statusText }}</span>
         </div>
-        <el-button v-if="!isConnected" type="primary" size="small" @click="handleConnect" :loading="isConnecting">
+        
+        <el-select 
+            v-model="selectedConnectionUrl" 
+            placeholder="选择连接" 
+            size="small" 
+            style="width: 200px;"
+            :disabled="isConnected || isConnecting"
+            @change="handleConnectionSelect"
+        >
+            <el-option
+                v-for="item in connectionHistory"
+                :key="item.url"
+                :label="item.name"
+                :value="item.url"
+            >
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>{{ item.name }}</span>
+                    <span style="font-size: 11px; color: #999;">{{ item.url }}</span>
+                </div>
+            </el-option>
+        </el-select>
+        
+        <el-button 
+            type="primary" 
+            size="small" 
+            :icon="Plus"
+            @click="showConnectionDialog = true"
+            :disabled="isConnected || isConnecting"
+            plain
+        >
+            新增连接
+        </el-button>
+        
+        <el-button 
+            v-if="!isConnected" 
+            type="primary" 
+            size="small" 
+            @click="handleConnect" 
+            :loading="isConnecting"
+            :disabled="!selectedConnectionUrl"
+        >
             {{ isConnecting ? '连接中...' : '连接' }}
         </el-button>
-        <el-button v-else type="danger" size="small" @click="handleDisconnect">
+        <el-button 
+            v-else 
+            type="danger" 
+            size="small" 
+            @click="handleDisconnect"
+        >
             断开
         </el-button>
     </div>
+    
+    <!-- 连接对话框 -->
+    <ConnectionDialog 
+        v-model="showConnectionDialog" 
+        @connected="handleDialogConnected"
+    />
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { ElButton, ElMessage } from 'element-plus'
+import { ref, computed, onMounted } from 'vue'
+import { ElButton, ElSelect, ElOption, ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
 import { rosConnection } from '@/services/rosConnection'
+import ConnectionDialog from '@/components/ConnectionDialog.vue'
+
+interface ConnectionHistoryItem {
+    name: string
+    url: string
+}
 
 const rosStore = useRosStore()
+
+const showConnectionDialog = ref(false)
+const selectedConnectionUrl = ref<string>('')
+const connectionHistory = ref<ConnectionHistoryItem[]>([])
 
 const isConnected = computed(() => rosStore.isConnected)
 const isConnecting = computed(() => rosStore.connectionState.connecting)
@@ -36,12 +98,43 @@ const statusText = computed(() => {
     return '未连接'
 })
 
+// 加载连接历史
+const loadConnectionHistory = () => {
+    try {
+        const stored = localStorage.getItem('ros_connection_history')
+        if (stored) {
+            const parsed = JSON.parse(stored)
+            connectionHistory.value = Array.isArray(parsed) ? parsed : []
+        }
+    } catch (error) {
+        console.error('加载连接历史失败:', error)
+        connectionHistory.value = []
+    }
+}
+
+// 处理连接选择
+const handleConnectionSelect = (url: string) => {
+    if (url) {
+        rosStore.setConnectionState({ url })
+    }
+}
+
+// 处理连接
 const handleConnect = async () => {
-    rosStore.setConnectionState({ connecting: true, error: null })
+    if (!selectedConnectionUrl.value) {
+        ElMessage.warning('请先选择连接')
+        return
+    }
+
+    rosStore.setConnectionState({ 
+        connecting: true, 
+        error: null,
+        url: selectedConnectionUrl.value
+    })
 
     try {
         await rosConnection.connect({
-            url: rosStore.connectionState.url
+            url: selectedConnectionUrl.value
         })
 
         rosStore.setConnectionState({ connected: true, connecting: false })
@@ -61,11 +154,51 @@ const handleConnect = async () => {
     }
 }
 
+// 处理对话框连接成功
+const handleDialogConnected = () => {
+    loadConnectionHistory()
+    // 如果对话框连接成功，更新选择框
+    if (rosStore.connectionState.url) {
+        selectedConnectionUrl.value = rosStore.connectionState.url
+    }
+}
+
 const handleDisconnect = () => {
     rosConnection.disconnect()
     rosStore.setConnectionState({ connected: false, connecting: false })
     ElMessage.info('已断开连接')
 }
+
+// 监听连接历史变化（当其他组件修改历史记录时）
+const watchHistoryChanges = () => {
+    // 使用定时器定期检查localStorage变化（简单方法）
+    setInterval(() => {
+        const stored = localStorage.getItem('ros_connection_history')
+        if (stored) {
+            try {
+                const parsed = JSON.parse(stored)
+                const newHistory = Array.isArray(parsed) ? parsed : []
+                // 检查是否有变化
+                if (JSON.stringify(newHistory) !== JSON.stringify(connectionHistory.value)) {
+                    connectionHistory.value = newHistory
+                }
+            } catch (error) {
+                // 忽略解析错误
+            }
+        }
+    }, 1000) // 每秒检查一次
+}
+
+// 初始化
+onMounted(() => {
+    loadConnectionHistory()
+    // 如果有当前URL，设置为选中
+    if (rosStore.connectionState.url) {
+        selectedConnectionUrl.value = rosStore.connectionState.url
+    }
+    // 开始监听历史记录变化
+    watchHistoryChanges()
+})
 </script>
 
 <style scoped>
@@ -73,6 +206,8 @@ const handleDisconnect = () => {
     display: flex;
     align-items: center;
     gap: 10px;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 
 .status-indicator {

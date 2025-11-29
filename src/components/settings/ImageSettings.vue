@@ -29,19 +29,17 @@
                     <!-- 方向控制 -->
                     <div class="ptz-grid">
                         <div class="ptz-row">
-                            <div class="ptz-cell empty"></div>
+                            <div class="ptz-cell empty" />
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowUp" circle size="small"
-                                    @mousedown="startPtzAction('ptz_up')" @mouseup="stopPtzAction"
-                                    @mouseleave="stopPtzAction" />
+                                    @click="publishPtzCommand('ptz_up')" />
                             </div>
-                            <div class="ptz-cell empty"></div>
+                            <div class="ptz-cell empty" />
                         </div>
                         <div class="ptz-row">
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowLeft" circle size="small"
-                                    @mousedown="startPtzAction('ptz_left')" @mouseup="stopPtzAction"
-                                    @mouseleave="stopPtzAction" />
+                                    @click="publishPtzCommand('ptz_left')" />
                             </div>
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn ptz-stop" circle size="small"
@@ -53,18 +51,16 @@
                             </div>
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowRight" circle size="small"
-                                    @mousedown="startPtzAction('ptz_right')" @mouseup="stopPtzAction"
-                                    @mouseleave="stopPtzAction" />
+                                    @click="publishPtzCommand('ptz_right')" />
                             </div>
                         </div>
                         <div class="ptz-row">
-                            <div class="ptz-cell empty"></div>
+                            <div class="ptz-cell empty" />
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowDown" circle size="small"
-                                    @mousedown="startPtzAction('ptz_down')" @mouseup="stopPtzAction"
-                                    @mouseleave="stopPtzAction" />
+                                    @click="publishPtzCommand('ptz_down')" />
                             </div>
-                            <div class="ptz-cell empty"></div>
+                            <div class="ptz-cell empty" />
                         </div>
                     </div>
 
@@ -74,11 +70,9 @@
                             <span class="control-label">缩放</span>
                             <div class="control-buttons">
                                 <el-button class="ptz-btn" :icon="ZoomOut" circle size="small"
-                                    @mousedown="startPtzAction('ptz_zoom_out')" @mouseup="stopPtzAction"
-                                    @mouseleave="stopPtzAction" />
+                                    @click="publishPtzCommand('ptz_zoom_out')" />
                                 <el-button class="ptz-btn" :icon="ZoomIn" circle size="small"
-                                    @mousedown="startPtzAction('ptz_zoom_in')" @mouseup="stopPtzAction"
-                                    @mouseleave="stopPtzAction" />
+                                    @click="publishPtzCommand('ptz_zoom_in')" />
                             </div>
                         </div>
                         <div class="control-group">
@@ -156,9 +150,6 @@ const handleTopicChange = (value: string) => {
 watch(() => settingsStore.selectedTopic, (val) => { selectedTopic.value = val })
 
 // PTZ 控制相关
-let ptzInterval: number | null = null
-const activePtzCommand = ref<string | null>(null)
-
 const publishPtzCommand = async (command: string) => {
     const topic = `/camera/${command}`
 
@@ -177,34 +168,9 @@ const publishPtzCommand = async (command: string) => {
     }
 }
 
-const stopPtzAction = (emitStop = true) => {
-    if (ptzInterval) {
-        clearInterval(ptzInterval)
-        ptzInterval = null
-    }
-
-    if (emitStop && activePtzCommand.value) {
-        publishPtzCommand('ptz_stop')
-    }
-
-    activePtzCommand.value = null
-}
-
-const startPtzAction = (command: string) => {
-    if (activePtzCommand.value === command) {
-        return
-    }
-
-    stopPtzAction(false)
-    activePtzCommand.value = command
-    publishPtzCommand(command)
-    ptzInterval = window.setInterval(() => {
-        publishPtzCommand(command)
-    }, 200)
-}
-
 onUnmounted(() => {
-    stopPtzAction()
+    // 离开时停止云台运动
+    publishPtzCommand('ptz_stop')
 })
 </script>
 

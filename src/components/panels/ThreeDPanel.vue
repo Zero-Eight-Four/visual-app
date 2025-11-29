@@ -183,6 +183,27 @@ const initThreeJS = () => {
     const animate = () => {
         animationId = requestAnimationFrame(animate)
         controls.update()
+
+        // 更新文本sprite的大小，使其在屏幕上的大小保持固定
+        if (camera && textSprites.length > 0) {
+            textSprites.forEach(({ sprite, baseScale }) => {
+                // 计算相机到sprite的距离
+                const distance = camera.position.distanceTo(sprite.position)
+
+                // 根据距离调整scale，使屏幕上的大小保持固定
+                // 使用固定的参考距离（例如10米）来计算scale
+                const referenceDistance = 20.0
+                const scaleFactor = distance / referenceDistance
+
+                // 保持宽高比
+                const aspectRatio = sprite.scale.x / sprite.scale.y
+                const newHeight = baseScale * scaleFactor
+                const newWidth = newHeight * aspectRatio
+
+                sprite.scale.set(newWidth, newHeight, 1)
+            })
+        }
+
         renderer.render(scene, camera)
     }
     animate()
@@ -232,9 +253,20 @@ const handleMapMessage = (message: any) => {
         // 保存地图数据
         currentMapData = message
 
+        const { width, height } = message.info
+        const totalPixels = width * height
+
+        // 如果地图很大，显示加载提示
+        if (totalPixels > 1000000) { // 超过100万像素
+            ElMessage.info(`正在加载地图 (${width}×${height})，请稍候...`)
+        }
+
         if (mapMesh) {
             // 更新现有地图
             updateMapPlane(mapMesh, message)
+            if (totalPixels > 1000000) {
+                ElMessage.success('地图更新完成')
+            }
         } else {
             // 创建新地图
             mapMesh = createMapPlane(message)
@@ -242,6 +274,9 @@ const handleMapMessage = (message: any) => {
                 scene.add(mapMesh)
                 // 自动调整相机以适应地图
                 fitCameraToMap(message)
+                if (totalPixels > 1000000) {
+                    ElMessage.success('地图加载完成')
+                }
             } else {
                 console.error('❌ 创建地图网格失败')
             }
@@ -249,6 +284,7 @@ const handleMapMessage = (message: any) => {
     } catch (error) {
         console.error('❌ 处理地图消息失败:', error)
         console.error('消息内容:', message)
+        ElMessage.error('处理地图数据失败')
     }
 }
 
@@ -369,6 +405,8 @@ const handlePlanMessage = (message: any) => {
 
 // 订阅markers话题
 let markerObjects: THREE.Object3D[] = []
+// 存储文本sprite的引用和原始大小，用于固定屏幕大小
+let textSprites: Array<{ sprite: THREE.Sprite; baseScale: number }> = []
 const subscribeToMarkers = async () => {
     if (!rosConnection.isConnected()) return
 
@@ -388,31 +426,111 @@ const subscribeToMarkers = async () => {
     }
 }
 
+// 清理marker对象的辅助函数
+const disposeMarkerObject = (obj: THREE.Object3D) => {
+    if (obj instanceof THREE.Group) {
+        // Group包含多个子对象（如箭头组）
+        obj.children.forEach(child => {
+            if (child instanceof THREE.Mesh) {
+                child.geometry.dispose()
+                if (child.material instanceof THREE.Material) {
+                    child.material.dispose()
+                }
+            } else if (child instanceof THREE.Sprite) {
+                if (child.material instanceof THREE.SpriteMaterial) {
+                    if (child.material.map) {
+                        child.material.map.dispose()
+                    }
+                    child.material.dispose()
+                }
+            }
+        })
+    } else if (obj instanceof THREE.Mesh) {
+        obj.geometry.dispose()
+        if (obj.material instanceof THREE.Material) {
+            obj.material.dispose()
+        }
+    } else if (obj instanceof THREE.Sprite) {
+        // Sprite的材质和纹理需要清理
+        if (obj.material instanceof THREE.SpriteMaterial) {
+            if (obj.material.map) {
+                obj.material.map.dispose()
+            }
+            obj.material.dispose()
+        }
+    }
+}
+
 // 处理markers消息
 const handleMarkersMessage = (message: any) => {
     if (!scene) return
 
     try {
-        // 移除旧的markers
-        markerObjects.forEach(obj => {
-            scene.remove(obj)
-            if (obj instanceof THREE.Mesh) {
-                obj.geometry.dispose()
-                if (obj.material instanceof THREE.Material) {
-                    obj.material.dispose()
-                }
-            }
-        })
-        markerObjects = []
+        // 检查是否有DELETEALL操作
+        let hasDeleteAll = false
+        if (message.markers && Array.isArray(message.markers)) {
+            hasDeleteAll = message.markers.some((marker: any) => marker.action === 3)
+        }
+
+        // 如果有DELETEALL或需要清理，先移除旧的markers
+        if (hasDeleteAll || markerObjects.length > 0) {
+            markerObjects.forEach(obj => {
+                scene.remove(obj)
+                disposeMarkerObject(obj)
+            })
+            markerObjects = []
+            // 同时清理文本sprite引用
+            textSprites = []
+        }
+
+        // 如果只有DELETEALL，直接返回
+        if (hasDeleteAll && message.markers.length === 1) {
+            return
+        }
 
         // 创建新的markers
         if (message.markers && Array.isArray(message.markers)) {
             message.markers.forEach((marker: any) => {
-                if (marker.action === 0 || marker.action === undefined) { // ADD/MODIFY
+                // 跳过DELETEALL操作（已在上面处理）
+                if (marker.action === 3) { // DELETEALL
+                    return
+                }
+
+                // 处理DELETE操作（删除指定ID的marker）
+                if (marker.action === 2) { // DELETE
+                    // TODO: 实现按ID删除marker的逻辑
+                    return
+                }
+
+                // ADD/MODIFY操作
+                if (marker.action === 0 || marker.action === undefined || marker.action === 1) {
+                    // 调试：打印所有marker信息
+                    console.log('处理marker:', {
+                        type: marker.type,
+                        text: marker.text,
+                        action: marker.action,
+                        ns: marker.ns,
+                        id: marker.id,
+                        hasColor: !!marker.color,
+                        color: marker.color
+                    })
+
                     const markerObj = createMarker(marker)
                     if (markerObj) {
                         scene.add(markerObj)
                         markerObjects.push(markerObj)
+
+                        // 调试：打印文本标记信息
+                        if (marker.type === 9) {
+                            console.log('✅ 文本标记已创建:', {
+                                text: marker.text,
+                                position: marker.pose?.position,
+                                scale: marker.scale,
+                                obj: markerObj
+                            })
+                        }
+                    } else {
+                        console.warn('⚠️ Marker创建失败:', marker)
                     }
                 }
             })
@@ -432,6 +550,7 @@ const createMarker = (marker: any): THREE.Object3D | null => {
     // 根据marker类型创建不同的几何体
     switch (marker.type) {
         case 0: // ARROW
+            return createArrowMarker(marker, pos, orient)
         case 1: // CUBE
         case 2: // SPHERE
         case 3: // CYLINDER
@@ -443,6 +562,8 @@ const createMarker = (marker: any): THREE.Object3D | null => {
             return createSphereListMarker(marker)
         case 8: // POINTS
             return createPointsMarker(marker)
+        case 9: // TEXT_VIEW_FACING
+            return createTextMarker(marker, pos, orient)
         default:
             return createDefaultMarker(marker, pos)
     }
@@ -551,6 +672,142 @@ const createPointsMarker = (marker: any): THREE.Object3D | null => {
     })
 
     return new THREE.Points(geometry, material)
+}
+
+// 创建箭头marker
+const createArrowMarker = (marker: any, pos: any, orient: any): THREE.Object3D => {
+    // scale.x = 箭头长度, scale.y = 轴宽度, scale.z = 箭头头部高度
+    const length = marker.scale?.x || 0.5
+    const headLength = marker.scale?.z || 0.2
+    const headWidth = marker.scale?.y || 0.15
+
+    // 强制使用红色，忽略ROS消息中的颜色
+    const color = new THREE.Color(0xff0000) // 红色
+
+    const opacity = marker.color?.a !== undefined ? marker.color.a : 1.0
+
+    // 创建箭头组
+    const group = new THREE.Group()
+
+    // 1. 创建箭头轴（圆柱体）
+    const shaftLength = length - headLength
+    if (shaftLength > 0) {
+        const shaftRadius = headWidth * 0.3
+        const shaftGeometry = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 8)
+        const shaftMaterial = new THREE.MeshBasicMaterial({ color, transparent: opacity < 1.0, opacity })
+        const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial)
+        // 旋转到x轴方向
+        shaft.rotation.z = Math.PI / 2
+        shaft.position.x = shaftLength / 2
+        group.add(shaft)
+    }
+
+    // 2. 创建箭头头部（圆锥）
+    const headGeometry = new THREE.ConeGeometry(headWidth * 0.5, headLength, 8)
+    const headMaterial = new THREE.MeshBasicMaterial({ color, transparent: opacity < 1.0, opacity })
+    const head = new THREE.Mesh(headGeometry, headMaterial)
+    // 旋转到x轴方向，指向x轴正方向
+    head.rotation.z = -Math.PI / 2
+    head.position.x = length - headLength / 2
+    group.add(head)
+
+    // 设置位置
+    group.position.set(pos.x, pos.y, pos.z || 0)
+
+    // 应用方向（四元数）
+    if (orient) {
+        group.quaternion.set(orient.x, orient.y, orient.z, orient.w)
+    }
+
+    return group
+}
+
+// 创建文本marker
+const createTextMarker = (marker: any, pos: any, orient: any): THREE.Object3D | null => {
+    // 支持文本字段为字符串或数字
+    const textValue = marker.text !== undefined && marker.text !== null ? String(marker.text) : null
+    console.log('createTextMarker 被调用:', {
+        textValue,
+        markerText: marker.text,
+        markerType: marker.type,
+        hasPose: !!marker.pose,
+        position: pos
+    })
+
+    if (!textValue || textValue.trim() === '') {
+        console.warn('文本标记为空，跳过创建')
+        return null
+    }
+
+    // 强制使用红色
+    const textColor = '#ff0000' // 红色
+
+    // scale.z 是文字高度（米），转换为像素大小
+    // 假设1米 = 100像素来渲染文本
+    const textHeightM = marker.scale?.z || 0.2
+    const fontSizePx = Math.max(96, textHeightM * 400) // 最小96像素，更大的字体
+
+    // 创建文本精灵（面向相机的2D文本）
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')!
+
+    // 使用更大的画布以确保文本清晰
+    canvas.width = 512
+    canvas.height = 256
+
+    // 设置背景为透明
+    context.clearRect(0, 0, canvas.width, canvas.height)
+
+    // 设置文本样式
+    context.fillStyle = textColor
+    context.font = `bold ${fontSizePx}px Arial` // 使用粗体使文本更清晰
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+
+    // 添加文本描边以增强可见性
+    context.strokeStyle = '#000000'
+    context.lineWidth = 2
+    context.strokeText(textValue, canvas.width / 2, canvas.height / 2)
+    context.fillText(textValue, canvas.width / 2, canvas.height / 2)
+
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.needsUpdate = true
+    const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        alphaTest: 0.1 // 去除透明边缘
+    })
+    const sprite = new THREE.Sprite(material)
+
+    // 设置大小（scale.z 是文字高度，单位米）
+    // 根据文字高度和画布比例设置sprite大小
+    const aspectRatio = canvas.width / canvas.height
+    // 增大文本显示尺寸，确保可见（放大3倍）
+    const spriteWidth = textHeightM * aspectRatio * 6
+    const spriteHeight = textHeightM * 3
+    sprite.scale.set(spriteWidth, spriteHeight, 1)
+
+    // 设置位置（根据Python代码，文本已经在pose中包含了偏移）
+    sprite.position.set(pos.x, pos.y, pos.z || 0)
+
+    // 确保sprite始终面向相机（TEXT_VIEW_FACING）
+    // Sprite默认就会面向相机，但我们可以确保它在渲染队列中优先
+    sprite.renderOrder = 999 // 确保文本显示在其他对象之上
+
+    // 保存文本sprite的引用和原始大小，用于固定屏幕大小
+    textSprites.push({
+        sprite,
+        baseScale: spriteHeight // 保存原始高度作为基准
+    })
+
+    console.log('创建文本sprite:', {
+        text: textValue,
+        position: { x: pos.x, y: pos.y, z: pos.z },
+        scale: { width: spriteWidth, height: spriteHeight },
+        fontSize: fontSizePx
+    })
+
+    return sprite
 }
 
 // 创建默认marker（简单球体）
@@ -675,9 +932,12 @@ const handlePublishEvent = async (event: { type: PublishClickType; point?: any; 
 
         switch (event.type) {
             case 'point': {
+                // 发布到 /clicked_point 话题
+                // 对应 Python 文件: cb_click 接收 geometry_msgs/PointStamped
+                // Python 处理: msg.point.x, msg.point.y, msg.point.z
                 const message = makePointMessage(event.point, frameId)
                 await rosConnection.publish(
-                    settingsStore.publishPointTopic,
+                    settingsStore.publishPointTopic, // 默认: '/clicked_point'
                     'geometry_msgs/PointStamped',
                     message
                 )
@@ -685,13 +945,22 @@ const handlePublishEvent = async (event: { type: PublishClickType; point?: any; 
                 break
             }
             case 'pose': {
-                const message = makePoseMessage(event.pose, frameId)
-                await rosConnection.publish(
-                    settingsStore.publishPoseTopic,
-                    'geometry_msgs/PoseStamped',
-                    message
-                )
-                ElMessage.success('发布成功')
+                // 发布到 /goal_queue/add_pose 话题
+                // 对应 Python 文件: cb_add_pose 接收 geometry_msgs/PoseStamped
+                // Python 处理: msg.pose.position 和 msg.pose.orientation
+                if (onPosePublishedCallback) {
+                    // 如果设置了回调（修改/插入模式），使用回调处理
+                    onPosePublishedCallback(event.pose)
+                } else {
+                    // 正常发布模式：发布到 /goal_queue/add_pose
+                    const message = makePoseMessage(event.pose, frameId)
+                    await rosConnection.publish(
+                        settingsStore.publishPoseTopic, // 默认: '/goal_queue/add_pose'
+                        'geometry_msgs/PoseStamped',
+                        message
+                    )
+                    ElMessage.success('发布成功')
+                }
                 break
             }
             case 'pose_estimate': {
@@ -743,10 +1012,18 @@ const resetCamera = () => {
     controls.update()
 }
 
+// 暴露给外部的回调
+let onPosePublishedCallback: ((pose: any) => void) | null = null
+
+const setOnPosePublishedCallback = (callback: ((pose: any) => void) | null) => {
+    onPosePublishedCallback = callback
+}
+
 // 暴露方法供设置面板调用
 defineExpose({
     resetCamera,
-    handlePublishCommand
+    handlePublishCommand,
+    setOnPosePublishedCallback
 })
 
 // 监听设置变化

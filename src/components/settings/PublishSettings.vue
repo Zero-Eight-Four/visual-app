@@ -35,7 +35,9 @@
                             <el-input v-model="poseEstimateTopic" placeholder="/initialpose" />
                         </el-form-item>
 
-                        <el-divider content-position="left">协方差设置</el-divider>
+                        <el-divider content-position="left">
+                            协方差设置
+                        </el-divider>
 
                         <el-form-item label="X 标准差">
                             <el-input-number v-model="xDeviation" :min="0" :max="10" :step="0.1" :precision="2"

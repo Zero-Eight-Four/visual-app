@@ -37,8 +37,10 @@
                         <div class="info-grid">
                             <div class="info-item">
                                 <span class="label">状态:</span>
-                                <span class="value" :class="getSystemStatusClass(statusData.system_status)">
-                                    {{ statusData.system_status || 'N/A' }}
+                                <span class="value"
+                                    :class="statusData.motor_error_count ? 'error' : getSystemStatusClass(statusData.system_status)">
+                                    {{ statusData.motor_error_count ? `${statusData.motor_error_count}个电机错误` :
+                                        (statusData.system_status || 'N/A') }}
                                 </span>
                             </div>
                             <div class="info-item">
@@ -109,10 +111,6 @@
                                     {{ getMotorNameText(statusData.motor_coolest_name) }}
                                     {{ (statusData.motor_coolest_temp || 0).toFixed(0) }}°C
                                 </span>
-                            </div>
-                            <div class="info-item" v-if="statusData.motor_error_count">
-                                <span class="label">错误:</span>
-                                <span class="value error">{{ statusData.motor_error_count }}个电机</span>
                             </div>
                         </div>
                     </div>
@@ -224,8 +222,7 @@ const lastUpdateTime = ref<string>('--:--:--')
 const isConnected = computed(() => rosStore.isConnected)
 
 const handleDisconnect = () => {
-    // 主动断开前先更新状态，避免触发断连警告
-    rosStore.setConnectionState({ connected: false, connecting: false })
+    // 主动断开连接
     rosConnection.disconnect()
     ElMessage.info('已断开连接')
     showConnectionDialog.value = true

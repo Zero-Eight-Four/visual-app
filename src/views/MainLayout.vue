@@ -60,7 +60,9 @@ import TopicPublisher from '@/components/TopicPublisher.vue'
     display: flex;
     align-items: center;
     padding: 0 20px;
-    gap: 20px;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .title {

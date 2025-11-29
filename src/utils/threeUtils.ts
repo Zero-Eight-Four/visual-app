@@ -242,33 +242,39 @@ export function createMapPlane(mapData: {
   const ctx = canvas.getContext('2d')!
 
   const imageData = ctx.createImageData(width, height)
+  const data = imageData.data
+  const mapDataArray = mapData.data
+  const dataLength = mapDataArray.length
 
+  // 优化：使用单次循环，减少计算和内存访问
   // 将OccupancyGrid数据转换为图像（需要翻转Y轴，因为ROS地图原点在左下角，canvas原点在左上角）
-  for (let i = 0; i < mapData.data.length; i++) {
-    const value = mapData.data[i]
-    let color = 128 // 未知区域为灰色
+  for (let i = 0; i < dataLength; i++) {
+    const value = mapDataArray[i]
+    let color: number
 
+    // 优化：使用快速分支预测
     if (value === -1) {
       color = 128 // 未知
     } else if (value === 0) {
-      color = 255 // 空闲区域为白色
+      color = 255 // 空闲
     } else if (value === 100) {
-      color = 0 // 占用区域为黑色
+      color = 0 // 占用
     } else {
-      // 概率值转换为灰度
-      color = Math.floor(255 - (value / 100) * 255)
+      // 概率值转换为灰度（优化：避免浮点运算）
+      color = 255 - Math.floor((value * 255) / 100)
     }
 
-    // 翻转Y轴：ROS地图是从下到上，canvas是从上到下
+    // 计算翻转后的位置
     const x = i % width
     const y = Math.floor(i / width)
     const flippedY = height - 1 - y
     const idx = (flippedY * width + x) * 4
 
-    imageData.data[idx] = color
-    imageData.data[idx + 1] = color
-    imageData.data[idx + 2] = color
-    imageData.data[idx + 3] = 255
+    // 批量设置RGBA值
+    data[idx] = color     // R
+    data[idx + 1] = color // G
+    data[idx + 2] = color // B
+    data[idx + 3] = 255   // A
   }
 
   ctx.putImageData(imageData, 0, 0)
@@ -290,15 +296,32 @@ export function createMapPlane(mapData: {
 
   const mesh = new THREE.Mesh(geometry, material)
 
+  // PlaneGeometry默认在xy平面（z轴向上），这正是我们需要的
+  // 不需要旋转，地图直接显示在xy平面
+
   // 设置位置 (XY平面,Z轴向上)
   mesh.position.set(
     origin.position.x + (width * resolution) / 2,
     origin.position.y + (height * resolution) / 2,
-    0.01 // 稍微抬高避免z-fighting
+    0.0 // 地图在xy平面，z=0
   )
 
-  // 不需要旋转,保持在XY平面
-  // mesh.rotation.x = -Math.PI / 2
+  // 处理地图原点的方向（如果有旋转）
+  // ROS地图的origin.orientation通常表示地图坐标系相对于世界坐标系的旋转
+  // 这个旋转是在xy平面内的旋转（绕z轴）
+  if (origin.orientation) {
+    const originQuat = new THREE.Quaternion(
+      origin.orientation.x,
+      origin.orientation.y,
+      origin.orientation.z,
+      origin.orientation.w
+    )
+    // 应用地图原点的旋转（绕z轴）
+    mesh.quaternion.copy(originQuat)
+  } else {
+    // 默认无旋转
+    mesh.quaternion.set(0, 0, 0, 1)
+  }
 
   return mesh
 }
@@ -325,31 +348,35 @@ export function updateMapPlane(
   const ctx = canvas.getContext('2d')!
 
   const imageData = ctx.createImageData(width, height)
+  const data = imageData.data
+  const mapDataArray = mapData.data
 
-  for (let i = 0; i < mapData.data.length; i++) {
-    const value = mapData.data[i]
-    let color = 128
-
-    if (value === -1) {
-      color = 128
-    } else if (value === 0) {
-      color = 255
-    } else if (value === 100) {
-      color = 0
-    } else {
-      color = Math.floor(255 - (value / 100) * 255)
-    }
-
-    // 翻转Y轴：ROS地图是从下到上，canvas是从上到下
-    const x = i % width
-    const y = Math.floor(i / width)
+  // 优化：使用相同的优化逻辑
+  for (let y = 0; y < height; y++) {
     const flippedY = height - 1 - y
-    const idx = (flippedY * width + x) * 4
+    const sourceRowStart = y * width
+    const targetRowStart = flippedY * width * 4
 
-    imageData.data[idx] = color
-    imageData.data[idx + 1] = color
-    imageData.data[idx + 2] = color
-    imageData.data[idx + 3] = 255
+    for (let x = 0; x < width; x++) {
+      const value = mapDataArray[sourceRowStart + x]
+      let color: number
+
+      if (value === -1) {
+        color = 128
+      } else if (value === 0) {
+        color = 255
+      } else if (value === 100) {
+        color = 0
+      } else {
+        color = Math.floor(255 - (value / 100) * 255)
+      }
+
+      const idx = targetRowStart + x * 4
+      data[idx] = color
+      data[idx + 1] = color
+      data[idx + 2] = color
+      data[idx + 3] = 255
+    }
   }
 
   ctx.putImageData(imageData, 0, 0)

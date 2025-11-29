@@ -22,12 +22,19 @@ class RosConnection {
   private publishers = new Map<string, any>()
   private connectionCallbacks: ((connected: boolean) => void)[] = []
   private disconnectCallbacks: (() => void)[] = []
+  private intentionalDisconnect = false
+  private heartbeatTimer: any = null
+  private heartbeatFailCount = 0
+  private readonly HEARTBEAT_INTERVAL = 3000 // 3秒心跳
+  private readonly HEARTBEAT_TIMEOUT = 2000 // 2秒超时
+  private readonly MAX_HEARTBEAT_FAILURES = 3 // 最大失败次数
 
   /**
    * 连接到ROS Bridge服务器
    */
   async connect(config: ConnectionConfig): Promise<void> {
     const lib = await loadRoslib()
+    this.intentionalDisconnect = false
 
     return new Promise((resolve, reject) => {
       // 设置连接超时（15秒）
@@ -46,11 +53,13 @@ class RosConnection {
       this.ros.on('connection', () => {
         clearTimeout(timeout)
         this.notifyConnectionChange(true)
+        this.startHeartbeat()
         resolve()
       })
 
       this.ros.on('error', (error: any) => {
         clearTimeout(timeout)
+        this.stopHeartbeat()
         console.error('ROS connection error:', error)
         this.notifyConnectionChange(false)
         // WebSocket 错误事件返回的是 Event 对象，需要转换为 Error
@@ -63,8 +72,11 @@ class RosConnection {
 
       this.ros.on('close', () => {
         clearTimeout(timeout)
+        this.stopHeartbeat()
         this.notifyConnectionChange(false)
-        this.notifyDisconnect()
+        if (!this.intentionalDisconnect) {
+          this.notifyDisconnect()
+        }
       })
     })
   }
@@ -73,6 +85,8 @@ class RosConnection {
    * 断开ROS连接
    */
   disconnect(): void {
+    this.intentionalDisconnect = true
+    this.stopHeartbeat()
     if (this.ros) {
       // 清理所有订阅
       this.subscribers.forEach((sub) => sub.unsubscribe())
@@ -83,6 +97,61 @@ class RosConnection {
 
       this.ros.close()
       this.ros = null
+    }
+  }
+
+  /**
+   * 启动心跳检测
+   */
+  private startHeartbeat() {
+    this.stopHeartbeat()
+    this.heartbeatFailCount = 0
+
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.ros || !this.ros.isConnected) {
+        this.stopHeartbeat()
+        return
+      }
+
+      // 使用 getNodes 作为心跳包
+      // 设置超时 Promise
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Heartbeat timeout')), this.HEARTBEAT_TIMEOUT)
+      })
+
+      // 执行心跳检查
+      Promise.race([
+        new Promise((resolve, reject) => {
+          this.ros.getNodes(resolve, reject)
+        }),
+        timeoutPromise
+      ])
+        .then(() => {
+          // 心跳成功，重置失败计数
+          this.heartbeatFailCount = 0
+        })
+        .catch(() => {
+          // 心跳失败
+          this.heartbeatFailCount++
+          if (this.heartbeatFailCount >= this.MAX_HEARTBEAT_FAILURES) {
+            console.warn('Heartbeat failed too many times, closing connection')
+            this.stopHeartbeat()
+            // 触发断连逻辑
+            if (this.ros) {
+              this.ros.close()
+            }
+          }
+        })
+    }, this.HEARTBEAT_INTERVAL)
+  }
+
+  /**
+   * 停止心跳检测
+   */
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
     }
   }
 

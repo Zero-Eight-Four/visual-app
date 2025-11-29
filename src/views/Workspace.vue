@@ -19,9 +19,7 @@
                         <h3>地图工具</h3>
                     </div>
                     <div class="panel-content">
-                        <p style="text-align: center; color: #999; padding: 20px;">
-                            地图工具功能开发中...
-                        </p>
+                        <MapToolsPanel />
                     </div>
                 </div>
             </div>
@@ -114,7 +112,7 @@
                 </el-icon>
                 <h3 style="margin-bottom: 12px; color: #F56C6C;">机器狗连接已断开</h3>
                 <p style="color: #666; margin-bottom: 20px;">
-                    与机器狗的 WebSocket 连接已断开，请检查网络连接或机器狗状态。
+                    与机器狗的连接已断开，请检查网络连接或机器狗状态。
                 </p>
                 <div class="disconnect-info">
                     <p style="font-size: 12px; color: #999;">
@@ -161,6 +159,7 @@ import { DataAnalysis, View, Position, Connection, TrendCharts } from '@element-
 import ThreeDPanel from '@/components/panels/ThreeDPanel.vue'
 import ImagePanel from '@/components/panels/ImagePanel.vue'
 import RobotStatusPanel from '@/components/panels/RobotStatusPanel.vue'
+import MapToolsPanel from '@/components/panels/MapToolsPanel.vue'
 import ThreeDSettings from '@/components/settings/ThreeDSettings.vue'
 import ImageSettings from '@/components/settings/ImageSettings.vue'
 import { rosConnection } from '@/services/rosConnection'
@@ -185,29 +184,17 @@ const rosStore = useRosStore()
 
 // 断连回调函数
 const handleDisconnect = () => {
-    // 先保存当前连接状态
-    const wasConnected = rosStore.isConnected
+    // 仅在意外断连时触发（由 rosConnection.ts 的 intentionalDisconnect 标志控制）
+    const now = new Date()
+    disconnectTime.value = now.toLocaleString('zh-CN')
+    disconnectWarningVisible.value = true
 
-    // 立即更新 store 状态
-    rosStore.setConnectionState({
-        connected: false,
-        connecting: false,
-        error: '连接已断开'
+    // 同时显示消息提示
+    ElMessage.error({
+        message: '机器狗连接已断开！',
+        duration: 5000,
+        showClose: true
     })
-
-    // 根据之前的连接状态决定是否显示警告
-    if (wasConnected) {
-        const now = new Date()
-        disconnectTime.value = now.toLocaleString('zh-CN')
-        disconnectWarningVisible.value = true
-
-        // 同时显示消息提示
-        ElMessage.error({
-            message: '机器狗连接已断开！',
-            duration: 5000,
-            showClose: true
-        })
-    }
 }// 确认断连警告
 const handleDisconnectConfirm = () => {
     disconnectWarningVisible.value = false
