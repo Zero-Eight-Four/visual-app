@@ -20,8 +20,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    // rosConnection doesn't have offConnectionChange, but it's a singleton and App is root, so it's fine.
-    // Or I should add offConnectionChange to rosConnection.ts for correctness.
+    rosConnection.offConnectionChange(handleConnectionChange)
 })
 </script>
 

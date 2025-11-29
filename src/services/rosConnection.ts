@@ -295,6 +295,16 @@ class RosConnection {
   }
 
   /**
+   * 移除连接状态变化回调
+   */
+  offConnectionChange(callback: (connected: boolean) => void): void {
+    const index = this.connectionCallbacks.indexOf(callback)
+    if (index > -1) {
+      this.connectionCallbacks.splice(index, 1)
+    }
+  }
+
+  /**
    * 注册断连回调
    */
   onDisconnect(callback: () => void): void {

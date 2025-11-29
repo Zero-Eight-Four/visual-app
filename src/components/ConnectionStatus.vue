@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElButton, ElSelect, ElOption, ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
@@ -82,6 +82,7 @@ const rosStore = useRosStore()
 const showConnectionDialog = ref(false)
 const selectedConnectionUrl = ref<string>('')
 const connectionHistory = ref<ConnectionHistoryItem[]>([])
+let historyWatchInterval: number | null = null
 
 const isConnected = computed(() => rosStore.isConnected)
 const isConnecting = computed(() => rosStore.connectionState.connecting)
@@ -171,8 +172,12 @@ const handleDisconnect = () => {
 
 // 监听连接历史变化（当其他组件修改历史记录时）
 const watchHistoryChanges = () => {
+    // 先清理之前的定时器（如果存在）
+    if (historyWatchInterval !== null) {
+        clearInterval(historyWatchInterval)
+    }
     // 使用定时器定期检查localStorage变化（简单方法）
-    setInterval(() => {
+    historyWatchInterval = window.setInterval(() => {
         const stored = localStorage.getItem('ros_connection_history')
         if (stored) {
             try {
@@ -198,6 +203,15 @@ onMounted(() => {
     }
     // 开始监听历史记录变化
     watchHistoryChanges()
+})
+
+// 清理资源
+onUnmounted(() => {
+    // 清理连接历史监听定时器
+    if (historyWatchInterval !== null) {
+        clearInterval(historyWatchInterval)
+        historyWatchInterval = null
+    }
 })
 </script>
 
