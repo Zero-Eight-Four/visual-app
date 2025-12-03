@@ -13,7 +13,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { ElButton, ElIcon, ElMessage } from 'element-plus'
+import { ElButton, ElIcon, ElMessage, ElMessageBox } from 'element-plus'
 import { FullScreen } from '@element-plus/icons-vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -82,6 +82,10 @@ const initThreeJS = () => {
         controls.enableRotate = false
     }
 
+    // 默认：左键拖动（未发布时）
+    // 发布时：右键拖动（通过 watch publishActive 动态调整）
+    updateControlsForPublishState(false)
+
     // 添加网格 (旋转到XY平面)
     gridHelper = new THREE.GridHelper(20, 20, 0xcccccc, 0xdddddd)
     gridHelper.rotation.x = Math.PI / 2  // 旋转到XY平面
@@ -149,6 +153,7 @@ const initThreeJS = () => {
     // 添加鼠标事件监听
     renderer.domElement.addEventListener('mousemove', handleMouseMove)
     renderer.domElement.addEventListener('click', handleMouseClick)
+    renderer.domElement.addEventListener('contextmenu', handleContextMenu)
 
     // 窗口大小调整
     const handleResize = () => {
@@ -467,12 +472,18 @@ const handleMarkersMessage = (message: any) => {
 
     try {
         // 检查是否有DELETEALL操作
+        // 根据C++代码，DELETEALL标记的action=3，id=0，ns="goal_queue"
         let hasDeleteAll = false
+        let deleteAllMarker: any = null
         if (message.markers && Array.isArray(message.markers)) {
-            hasDeleteAll = message.markers.some((marker: any) => marker.action === 3)
+            deleteAllMarker = message.markers.find((marker: any) =>
+                marker.action === 3 || (marker.action === undefined && marker.type === undefined && marker.id === 0)
+            )
+            hasDeleteAll = !!deleteAllMarker
         }
 
         // 如果有DELETEALL或需要清理，先移除旧的markers
+        // 注意：即使没有DELETEALL，如果收到新的标记数组，也应该清除旧的（因为后端会重新发布所有标记）
         if (hasDeleteAll || markerObjects.length > 0) {
             markerObjects.forEach(obj => {
                 scene.remove(obj)
@@ -481,6 +492,7 @@ const handleMarkersMessage = (message: any) => {
             markerObjects = []
             // 同时清理文本sprite引用
             textSprites = []
+
         }
 
         // 如果只有DELETEALL，直接返回
@@ -490,48 +502,51 @@ const handleMarkersMessage = (message: any) => {
 
         // 创建新的markers
         if (message.markers && Array.isArray(message.markers)) {
-            message.markers.forEach((marker: any) => {
-                // 跳过DELETEALL操作（已在上面处理）
-                if (marker.action === 3) { // DELETEALL
-                    return
+            // 先过滤出有效的markers（非DELETEALL和DELETE操作）
+            const validMarkers = message.markers.filter((marker: any) => {
+                // 跳过DELETEALL操作
+                if (marker.action === 3) {
+                    return false
                 }
-
-                // 处理DELETE操作（删除指定ID的marker）
-                if (marker.action === 2) { // DELETE
-                    // TODO: 实现按ID删除marker的逻辑
-                    return
+                // 跳过DELETE操作
+                if (marker.action === 2) {
+                    return false
                 }
+                // 只处理ADD/MODIFY操作
+                return marker.action === 0 || marker.action === undefined || marker.action === 1
+            })
 
-                // ADD/MODIFY操作
-                if (marker.action === 0 || marker.action === undefined || marker.action === 1) {
-                    // 调试：打印所有marker信息
-                    console.log('处理marker:', {
-                        type: marker.type,
-                        text: marker.text,
-                        action: marker.action,
-                        ns: marker.ns,
-                        id: marker.id,
-                        hasColor: !!marker.color,
-                        color: marker.color
-                    })
+            // 按ID排序，确保显示顺序正确
+            // 根据C++后端代码：对于队列中的第i个点（索引i，从0开始）
+            // - 箭头标记ID = i * 2（偶数：0, 2, 4, 6, ...）
+            // - 文本标记ID = i * 2 + 1（奇数：1, 3, 5, 7, ...）
+            // - 文本内容 = i + 1（从1开始的点号）
+            // 所以按ID排序即可保证正确的顺序
+            validMarkers.sort((a: any, b: any) => {
+                // 优先按ID排序（这是主要排序依据）
+                if (a.id !== undefined && b.id !== undefined) {
+                    return a.id - b.id
+                }
+                // 如果ID不存在，按类型排序（箭头在前，文本在后）
+                // 但这不应该发生，因为后端总是会设置ID
+                if (a.type === 0 && b.type === 9) {
+                    return -1
+                }
+                if (a.type === 9 && b.type === 0) {
+                    return 1
+                }
+                return 0
+            })
 
-                    const markerObj = createMarker(marker)
-                    if (markerObj) {
-                        scene.add(markerObj)
-                        markerObjects.push(markerObj)
-
-                        // 调试：打印文本标记信息
-                        if (marker.type === 9) {
-                            console.log('✅ 文本标记已创建:', {
-                                text: marker.text,
-                                position: marker.pose?.position,
-                                scale: marker.scale,
-                                obj: markerObj
-                            })
-                        }
-                    } else {
-                        console.warn('⚠️ Marker创建失败:', marker)
-                    }
+            // 处理排序后的markers
+            // 根据C++后端代码，标记的ID和文本内容都是基于队列索引计算的
+            // 所以我们应该直接使用后端发送的文本内容，而不是自己计算
+            validMarkers.forEach((marker: any) => {
+                // 调试：打印所有marker信息（特别是文本标记）
+                const markerObj = createMarker(marker)
+                if (markerObj) {
+                    scene.add(markerObj)
+                    markerObjects.push(markerObj)
                 }
             })
         }
@@ -677,9 +692,10 @@ const createPointsMarker = (marker: any): THREE.Object3D | null => {
 // 创建箭头marker
 const createArrowMarker = (marker: any, pos: any, orient: any): THREE.Object3D => {
     // scale.x = 箭头长度, scale.y = 轴宽度, scale.z = 箭头头部高度
-    const length = marker.scale?.x || 0.5
-    const headLength = marker.scale?.z || 0.2
-    const headWidth = marker.scale?.y || 0.15
+    // 增大默认尺寸，使箭头更清晰可见（放大2倍）
+    const length = (marker.scale?.x || 0.5) * 2
+    const headLength = (marker.scale?.z || 0.2) * 2
+    const headWidth = (marker.scale?.y || 0.15) * 2
 
     // 强制使用红色，忽略ROS消息中的颜色
     const color = new THREE.Color(0xff0000) // 红色
@@ -726,16 +742,8 @@ const createArrowMarker = (marker: any, pos: any, orient: any): THREE.Object3D =
 const createTextMarker = (marker: any, pos: any, orient: any): THREE.Object3D | null => {
     // 支持文本字段为字符串或数字
     const textValue = marker.text !== undefined && marker.text !== null ? String(marker.text) : null
-    console.log('createTextMarker 被调用:', {
-        textValue,
-        markerText: marker.text,
-        markerType: marker.type,
-        hasPose: !!marker.pose,
-        position: pos
-    })
 
     if (!textValue || textValue.trim() === '') {
-        console.warn('文本标记为空，跳过创建')
         return null
     }
 
@@ -744,16 +752,17 @@ const createTextMarker = (marker: any, pos: any, orient: any): THREE.Object3D | 
 
     // scale.z 是文字高度（米），转换为像素大小
     // 假设1米 = 100像素来渲染文本
-    const textHeightM = marker.scale?.z || 0.2
-    const fontSizePx = Math.max(96, textHeightM * 400) // 最小96像素，更大的字体
+    // 增大默认文字高度和字体大小，使文字更清晰可见（放大2倍）
+    const textHeightM = (marker.scale?.z || 0.2) * 2
+    const fontSizePx = Math.max(192, textHeightM * 800) // 最小192像素，更大的字体（放大2倍）
 
     // 创建文本精灵（面向相机的2D文本）
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d')!
 
-    // 使用更大的画布以确保文本清晰
-    canvas.width = 512
-    canvas.height = 256
+    // 使用更大的画布以确保文本清晰（放大2倍）
+    canvas.width = 1024
+    canvas.height = 512
 
     // 设置背景为透明
     context.clearRect(0, 0, canvas.width, canvas.height)
@@ -764,9 +773,9 @@ const createTextMarker = (marker: any, pos: any, orient: any): THREE.Object3D | 
     context.textAlign = 'center'
     context.textBaseline = 'middle'
 
-    // 添加文本描边以增强可见性
+    // 添加文本描边以增强可见性（增大描边宽度）
     context.strokeStyle = '#000000'
-    context.lineWidth = 2
+    context.lineWidth = 4
     context.strokeText(textValue, canvas.width / 2, canvas.height / 2)
     context.fillText(textValue, canvas.width / 2, canvas.height / 2)
 
@@ -782,9 +791,9 @@ const createTextMarker = (marker: any, pos: any, orient: any): THREE.Object3D | 
     // 设置大小（scale.z 是文字高度，单位米）
     // 根据文字高度和画布比例设置sprite大小
     const aspectRatio = canvas.width / canvas.height
-    // 增大文本显示尺寸，确保可见（放大3倍）
-    const spriteWidth = textHeightM * aspectRatio * 6
-    const spriteHeight = textHeightM * 3
+    // 增大文本显示尺寸，确保可见（放大更多倍，使文字更清晰）
+    const spriteWidth = textHeightM * aspectRatio * 2
+    const spriteHeight = textHeightM * 2
     sprite.scale.set(spriteWidth, spriteHeight, 1)
 
     // 设置位置（根据Python代码，文本已经在pose中包含了偏移）
@@ -798,13 +807,6 @@ const createTextMarker = (marker: any, pos: any, orient: any): THREE.Object3D | 
     textSprites.push({
         sprite,
         baseScale: spriteHeight // 保存原始高度作为基准
-    })
-
-    console.log('创建文本sprite:', {
-        text: textValue,
-        position: { x: pos.x, y: pos.y, z: pos.z },
-        scale: { width: spriteWidth, height: spriteHeight },
-        fontSize: fontSizePx
     })
 
     return sprite
@@ -872,7 +874,30 @@ const initPublishTool = () => {
     // 设置状态变化回调
     publishTool.onStateChange((active) => {
         publishActive.value = active
+        // 更新控制器状态
+        updateControlsForPublishState(active)
     })
+}
+
+// 更新控制器状态（根据是否在发布模式）
+const updateControlsForPublishState = (isPublishing: boolean) => {
+    if (!controls) return
+
+    if (isPublishing) {
+        // 发布模式：禁用左键拖动，启用右键拖动
+        controls.mouseButtons = {
+            LEFT: null, // 禁用左键拖动
+            MIDDLE: THREE.MOUSE.DOLLY,
+            RIGHT: THREE.MOUSE.PAN // 右键拖动
+        }
+    } else {
+        // 非发布模式：启用左键拖动，禁用右键拖动
+        controls.mouseButtons = {
+            LEFT: THREE.MOUSE.PAN, // 左键拖动
+            MIDDLE: THREE.MOUSE.DOLLY,
+            RIGHT: null // 禁用右键拖动
+        }
+    }
 }
 
 // 处理鼠标移动
@@ -887,7 +912,7 @@ const handleMouseMove = (event: MouseEvent) => {
     publishTool.handleMouseMove(worldPoint)
 }
 
-// 处理鼠标点击
+// 处理鼠标点击（左键）
 const handleMouseClick = (event: MouseEvent) => {
     if (!canvasContainer.value || !publishTool?.isActive()) return
 
@@ -897,6 +922,14 @@ const handleMouseClick = (event: MouseEvent) => {
 
     const worldPoint = getWorldPoint(mouse!)
     publishTool.handleClick(worldPoint)
+}
+
+// 处理右键菜单（阻止默认行为，用于右键拖动）
+const handleContextMenu = (event: MouseEvent) => {
+    // 如果正在发布模式，阻止右键菜单，允许右键拖动
+    if (publishTool?.isActive()) {
+        event.preventDefault()
+    }
 }
 
 // 获取鼠标在世界坐标中的位置
@@ -920,7 +953,7 @@ const getWorldPoint = (mouseCoords: THREE.Vector2): THREE.Vector3 | null => {
     return worldPoint
 }
 
-// 处理发布事件
+// 处理发布事件（先显示确认对话框）
 const handlePublishEvent = async (event: { type: PublishClickType; point?: any; pose?: any }) => {
     if (!rosConnection.isConnected()) {
         ElMessage.warning('ROS未连接')
@@ -930,14 +963,62 @@ const handlePublishEvent = async (event: { type: PublishClickType; point?: any; 
     try {
         const frameId = 'map' // 使用地图坐标系
 
+        // 准备坐标信息字符串
+        let coordinateInfo = ''
+        let messageType = ''
+
         switch (event.type) {
             case 'point': {
-                // 发布到 /clicked_point 话题
-                // 对应 Python 文件: cb_click 接收 geometry_msgs/PointStamped
-                // Python 处理: msg.point.x, msg.point.y, msg.point.z
+                coordinateInfo = `X: ${event.point.x.toFixed(3)}\nY: ${event.point.y.toFixed(3)}\nZ: ${event.point.z.toFixed(3)}`
+                messageType = 'Point'
+                break
+            }
+            case 'pose': {
+                const pos = event.pose.position
+                const orient = event.pose.orientation
+                // 计算yaw角度（从四元数）
+                const yaw = Math.atan2(2 * (orient.w * orient.z + orient.x * orient.y),
+                    1 - 2 * (orient.y * orient.y + orient.z * orient.z))
+                const yawDeg = (yaw * 180 / Math.PI).toFixed(2)
+                coordinateInfo = `位置:\n  X: ${pos.x.toFixed(3)}\n  Y: ${pos.y.toFixed(3)}\n  Z: ${pos.z.toFixed(3)}\n\n方向:\n  Yaw: ${yawDeg}°`
+                messageType = '目标'
+                break
+            }
+            case 'pose_estimate': {
+                const pos = event.pose.position
+                const orient = event.pose.orientation
+                const yaw = Math.atan2(2 * (orient.w * orient.z + orient.x * orient.y),
+                    1 - 2 * (orient.y * orient.y + orient.z * orient.z))
+                const yawDeg = (yaw * 180 / Math.PI).toFixed(2)
+                coordinateInfo = `位置:\n  X: ${pos.x.toFixed(3)}\n  Y: ${pos.y.toFixed(3)}\n  Z: ${pos.z.toFixed(3)}\n\n方向:\n  Yaw: ${yawDeg}°`
+                messageType = 'PoseEstimate'
+                break
+            }
+        }
+
+        // 显示确认对话框
+        try {
+            await ElMessageBox.confirm(
+                `坐标信息：\n\n${coordinateInfo}\n\n是否确认发送？`,
+                `确认发布${messageType}`,
+                {
+                    confirmButtonText: '确定',
+                    cancelButtonText: '取消',
+                    type: 'info',
+                    dangerouslyUseHTMLString: false
+                }
+            )
+        } catch {
+            // 用户取消，不发送
+            return
+        }
+
+        // 用户确认后，发送消息
+        switch (event.type) {
+            case 'point': {
                 const message = makePointMessage(event.point, frameId)
                 await rosConnection.publish(
-                    settingsStore.publishPointTopic, // 默认: '/clicked_point'
+                    settingsStore.publishPointTopic,
                     'geometry_msgs/PointStamped',
                     message
                 )
@@ -945,17 +1026,12 @@ const handlePublishEvent = async (event: { type: PublishClickType; point?: any; 
                 break
             }
             case 'pose': {
-                // 发布到 /goal_queue/add_pose 话题
-                // 对应 Python 文件: cb_add_pose 接收 geometry_msgs/PoseStamped
-                // Python 处理: msg.pose.position 和 msg.pose.orientation
                 if (onPosePublishedCallback) {
-                    // 如果设置了回调（修改/插入模式），使用回调处理
                     onPosePublishedCallback(event.pose)
                 } else {
-                    // 正常发布模式：发布到 /goal_queue/add_pose
                     const message = makePoseMessage(event.pose, frameId)
                     await rosConnection.publish(
-                        settingsStore.publishPoseTopic, // 默认: '/goal_queue/add_pose'
+                        settingsStore.publishPoseTopic,
                         'geometry_msgs/PoseStamped',
                         message
                     )
@@ -1078,6 +1154,7 @@ onUnmounted(() => {
     if (renderer) {
         renderer.domElement.removeEventListener('mousemove', handleMouseMove)
         renderer.domElement.removeEventListener('click', handleMouseClick)
+        renderer.domElement.removeEventListener('contextmenu', handleContextMenu)
     }
 
     // 清理 ResizeObserver

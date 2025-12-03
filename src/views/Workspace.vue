@@ -58,9 +58,11 @@
                         <h3>{{ currentSettingsTitle }}</h3>
                     </div>
                     <div class="panel-content">
-                        <ImageSettings v-if="selectedPanel === 'image'" />
-                        <ThreeDSettings v-else-if="selectedPanel === '3d'" />
-                        <div v-else class="empty-settings">
+                        <keep-alive>
+                            <ImageSettings v-if="selectedPanel === 'image'" />
+                            <ThreeDSettings v-else-if="selectedPanel === '3d'" />
+                        </keep-alive>
+                        <div v-if="!selectedPanel" class="empty-settings">
                             <p>点击左侧面板查看设置</p>
                         </div>
                     </div>
@@ -171,8 +173,8 @@ const threeDPanelRef = ref()
 // 通过provide传递给设置面板
 provide('threeDPanelRef', threeDPanelRef)
 
-// 当前选中的面板
-const selectedPanel = ref<'image' | '3d' | null>('image')
+// 当前选中的面板（默认显示任务规划）
+const selectedPanel = ref<'image' | '3d' | null>('3d')
 
 // AI对话框状态
 const aiDialogVisible = ref(false)
@@ -233,7 +235,7 @@ const selectPanel = (panel: 'image' | '3d') => {
 // 当前设置面板标题
 const currentSettingsTitle = computed(() => {
     if (selectedPanel.value === 'image') return '图像设置'
-    if (selectedPanel.value === '3d') return '任务规划设置'
+    if (selectedPanel.value === '3d') return '地图设置'
     return '设置'
 })
 
@@ -297,12 +299,12 @@ const openAIDialog = () => {
 }
 
 .left-panel.status-panel {
-    flex: 2;
+    flex: 3.4;
     min-height: 0;
 }
 
 .left-panel.tools-panel {
-    flex: 1;
+    flex: 1.5;
     min-height: 0;
 }
 
@@ -428,12 +430,12 @@ const openAIDialog = () => {
 }
 
 .right-panel.settings-panel {
-    flex: 2;
+    flex: 3.0;
     min-height: 0;
 }
 
 .right-panel.ai-panel {
-    flex: 1;
+    flex: 1.0;
     cursor: pointer;
     transition: all 0.2s ease;
 }

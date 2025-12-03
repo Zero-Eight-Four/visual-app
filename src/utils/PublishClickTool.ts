@@ -59,23 +59,23 @@ export class PublishClickTool {
     // 创建箭头标记
     this.arrow = new THREE.Group()
 
-    // 箭头轴
-    const shaftGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1, 8)
+    // 箭头轴（放大2倍，使箭头更清晰可见）
+    const shaftGeometry = new THREE.CylinderGeometry(0.1, 0.1, 2, 8)
     const shaftMaterial = new THREE.MeshBasicMaterial({
       color: this.publishType === 'pose_estimate' ? 0x00ffff : 0xff00ff
     })
     const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial)
     shaft.rotation.z = -Math.PI / 2
-    shaft.position.x = 0.5
+    shaft.position.x = 1.0
 
-    // 箭头头部
-    const headGeometry = new THREE.ConeGeometry(0.1, 0.25, 8)
+    // 箭头头部（放大2倍，使箭头更清晰可见）
+    const headGeometry = new THREE.ConeGeometry(0.2, 0.5, 8)
     const headMaterial = new THREE.MeshBasicMaterial({
       color: this.publishType === 'pose_estimate' ? 0x00ffff : 0xff00ff
     })
     const head = new THREE.Mesh(headGeometry, headMaterial)
     head.rotation.z = -Math.PI / 2
-    head.position.x = 1.125
+    head.position.x = 2.25
 
     this.arrow.add(shaft)
     this.arrow.add(head)

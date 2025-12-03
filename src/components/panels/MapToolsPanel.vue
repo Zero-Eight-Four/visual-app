@@ -1,81 +1,283 @@
 <template>
     <div class="map-tools-panel">
         <div class="tools-content">
-            <!-- 建图按钮 -->
-            <el-button type="primary" :icon="Location" @click="handleMapping" :disabled="!isConnected"
-                class="tool-button">
-                建图
-            </el-button>
-
-            <!-- 地图选择按钮 -->
-            <el-button type="default" :icon="FolderOpened" @click="showMapSelector = true" class="tool-button">
-                地图选择
-            </el-button>
-
-            <!-- 地图编辑按钮 -->
-            <el-button type="default" :icon="Edit" @click="handleMapEdit" class="tool-button">
-                地图编辑
-            </el-button>
-
-            <!-- 地图切换按钮 -->
-            <el-button type="default" :icon="Refresh" @click="handleMapSwitch" :disabled="availableMaps.length === 0"
-                class="tool-button">
-                地图切换
-            </el-button>
+            <!-- 建图按钮组 -->
+            <div class="button-group">
+                <el-button type="primary" :icon="Location" @click="handleMapping" :disabled="!isConnected"
+                    class="tool-button">
+                    开始建图
+                </el-button>
+            </div>
+            <div class="button-group">
+                <el-button type="primary" :icon="FolderOpened" @click="showMapSelector = true" class="tool-button">
+                    地图选择
+                </el-button>
+            </div>
+            <div class="button-group">
+                <el-button type="primary" :icon="Edit" @click="handleMapEdit" class="tool-button">
+                    地图编辑
+                </el-button>
+            </div>
+            <div class="button-group">
+                <el-button type="primary" :icon="Upload" @click="handleUploadMap" class="tool-button">
+                    上传地图
+                </el-button>
+            </div>
 
             <!-- 当前地图显示 -->
             <div v-if="currentMap" class="current-map-info">
-                <span class="label">当前地图:</span>
-                <span class="value">{{ currentMap }}</span>
+                <div class="map-name">
+                    <span class="label">当前地图:</span>
+                    <span class="value">{{ currentMap.displayName }}</span>
+                </div>
+                <div class="map-details">
+                    <span class="detail-item">路线数: {{ currentMap.queueCount }}</span>
+                </div>
             </div>
         </div>
 
         <!-- 地图选择对话框 -->
-        <el-dialog v-model="showMapSelector" title="选择地图" width="500px">
+        <el-dialog v-model="showMapSelector" title="选择地图" width="600px">
+            <template #header>
+                <div class="dialog-header">
+                    <span>选择地图</span>
+                    <el-button :icon="Refresh" circle size="small" @click="handleRefreshMaps" :loading="refreshingMaps"
+                        title="刷新地图列表" class="refresh-btn" />
+                </div>
+            </template>
             <div class="map-selector-content">
                 <div class="map-list">
-                    <div v-for="map in availableMaps" :key="map" class="map-item"
-                        :class="{ active: currentMap === map }" @click="selectMap(map)">
-                        <el-icon>
-                            <Document />
-                        </el-icon>
-                        <span>{{ map }}</span>
-                        <el-icon v-if="currentMap === map" class="check-icon">
+                    <div v-for="map in availableMaps" :key="map.folderName" class="map-item"
+                        :class="{ active: currentMap?.folderName === map.folderName }" @click="selectMap(map)">
+                        <div class="map-item-content">
+                            <el-icon class="map-icon">
+                                <FolderOpened />
+                            </el-icon>
+                            <div class="map-info">
+                                <div class="map-name">{{ map.displayName }}</div>
+                                <div class="map-meta">
+                                    <span class="meta-item" v-if="map.createTime">创建时间: {{ map.createTime }}</span>
+                                    <span class="meta-item">路线数: {{ map.queueCount }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <el-icon v-if="currentMap?.folderName === map.folderName" class="check-icon">
                             <Check />
                         </el-icon>
                     </div>
                     <div v-if="availableMaps.length === 0" class="empty-maps">
-                        <p>未找到地图文件</p>
+                        <el-icon :size="48" color="#ccc">
+                            <FolderOpened />
+                        </el-icon>
+                        <p>未找到地图文件夹</p>
+                        <p class="empty-hint">请确保 maps 文件夹下有地图文件夹，每个文件夹包含 map 和 queue 目录</p>
                     </div>
                 </div>
             </div>
             <template #footer>
                 <el-button @click="showMapSelector = false">取消</el-button>
-                <el-button type="primary" @click="confirmMapSelection">确定</el-button>
+                <el-button type="primary" @click="confirmMapSelection"
+                    :disabled="!currentMap || isUploading">确定</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 上传进度对话框 -->
+        <el-dialog v-model="showUploadProgress" title="发送地图文件" width="500px" :close-on-click-modal="false"
+            :close-on-press-escape="false">
+            <div class="upload-progress-content">
+                <div class="progress-info">
+                    <div class="progress-text">{{ uploadStatusText }}</div>
+                    <div class="progress-details" v-if="uploadCurrentFile">
+                        当前文件: {{ uploadCurrentFile }}
+                    </div>
+                </div>
+                <el-progress :percentage="Math.round(uploadProgress)"
+                    :status="uploadProgress === 100 ? 'success' : undefined" :stroke-width="20"
+                    :format="(percentage) => `${Math.round(percentage)}%`" style="margin-top: 20px;" />
+                <div class="progress-stats" v-if="uploadTotalFiles > 0">
+                    <div class="stat-item">
+                        <span class="stat-label">总文件数:</span>
+                        <span class="stat-value">{{ uploadTotalFiles }}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">已完成:</span>
+                        <span class="stat-value">{{ uploadCompletedFiles }}</span>
+                    </div>
+                    <div class="stat-item" v-if="uploadProgress === 100 && uploadWaiting">
+                        <span class="stat-label">等待写入:</span>
+                        <span class="stat-value">{{ uploadWaitCountdown }}s</span>
+                    </div>
+                </div>
+            </div>
+        </el-dialog>
+
+        <!-- 上传地图对话框 -->
+        <el-dialog v-model="showUploadMapDialog" title="上传地图" width="600px" @close="handleCloseUploadDialog">
+            <div class="upload-map-content">
+                <el-alert v-if="uploadMapError" :title="uploadMapError" type="error" :closable="false"
+                    style="margin-bottom: 20px;" />
+                <div class="upload-section">
+                    <el-button type="primary" @click="triggerFolderSelect" :loading="uploadingMap">
+                        <el-icon style="margin-right: 5px;">
+                            <Upload />
+                        </el-icon>
+                        从本地上传地图文件夹
+                    </el-button>
+                    <el-button type="success" @click="handleDownloadFromRobot" :loading="downloadingFromRobot"
+                        :disabled="!isConnected">
+                        <el-icon style="margin-right: 5px;">
+                            <Upload />
+                        </el-icon>
+                        从机器狗上传
+                    </el-button>
+                    <input ref="folderInputRef" type="file" webkitdirectory directory multiple style="display: none;"
+                        @change="handleFolderSelect" />
+                </div>
+                <div v-if="selectedFolderFiles.length > 0" class="folder-info">
+                    <el-divider>文件夹信息</el-divider>
+                    <div class="info-item">
+                        <span class="label">文件数量:</span>
+                        <span class="value">{{ selectedFolderFiles.length }}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">文件夹结构:</span>
+                        <div class="structure-tree">
+                            <div v-for="(files, dir) in folderStructure" :key="dir" class="structure-item">
+                                <el-icon>
+                                    <FolderOpened />
+                                </el-icon>
+                                <span>{{ dir }}</span>
+                                <span class="file-count">({{ files.length }} 个文件)</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="folderValidation" class="validation-result">
+                        <el-icon v-if="folderValidation.valid" color="#67c23a" style="margin-right: 5px;">
+                            <Check />
+                        </el-icon>
+                        <el-icon v-else color="#f56c6c" style="margin-right: 5px;">
+                            <Delete />
+                        </el-icon>
+                        <span :style="{ color: folderValidation.valid ? '#67c23a' : '#f56c6c' }">
+                            {{ folderValidation.message }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <template #footer>
+                <el-button @click="showUploadMapDialog = false">取消</el-button>
+                <el-button type="primary" @click="showMapNameDialog = true"
+                    :disabled="!folderValidation?.valid || uploadingMap">
+                    下一步：设置地图名称
+                </el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 地图名称输入对话框 -->
+        <el-dialog v-model="showMapNameDialog" title="设置地图信息" width="400px" @close="handleCloseMapNameDialog">
+            <div class="map-name-input">
+                <el-form :model="newMapNameForm" label-width="100px">
+                    <el-form-item label="地图名称" required>
+                        <el-input v-model="newMapNameForm.name" placeholder="请输入地图名称" maxlength="50" show-word-limit />
+                    </el-form-item>
+                    <el-form-item label="描述（可选）">
+                        <el-input v-model="newMapNameForm.description" type="textarea" :rows="3" placeholder="请输入地图描述"
+                            maxlength="200" show-word-limit />
+                    </el-form-item>
+                </el-form>
+            </div>
+            <template #footer>
+                <el-button @click="showMapNameDialog = false">取消</el-button>
+                <el-button type="primary" @click="confirmUploadMap" :loading="uploadingMap"
+                    :disabled="!newMapNameForm.name.trim()">
+                    确认上传
+                </el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 上传地图进度对话框 -->
+        <el-dialog v-model="showUploadMapProgress" title="上传地图" width="500px" :close-on-click-modal="false"
+            :close-on-press-escape="false">
+            <div class="upload-map-progress-content">
+                <div class="progress-text">{{ uploadMapStatusText }}</div>
+                <div class="progress-details" v-if="uploadMapCurrentFile">
+                    当前文件: {{ uploadMapCurrentFile }}
+                </div>
+                <el-progress :percentage="Math.round(uploadMapProgress)"
+                    :status="uploadMapProgress === 100 ? 'success' : undefined" :stroke-width="20"
+                    style="margin-top: 20px;" />
+                <div class="progress-stats" v-if="uploadMapTotalFiles > 0" style="margin-top: 20px;">
+                    <div class="stat-item">
+                        <span class="stat-label">总文件数:</span>
+                        <span class="stat-value">{{ uploadMapTotalFiles }}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">已完成:</span>
+                        <span class="stat-value">{{ uploadMapCompletedFiles }}</span>
+                    </div>
+                </div>
+            </div>
+        </el-dialog>
+
+        <!-- 地图编辑选择对话框 -->
+        <el-dialog v-model="showMapEditSelector" title="选择要编辑的地图" width="600px">
+            <template #header>
+                <div class="dialog-header">
+                    <span>选择要编辑的地图</span>
+                    <el-button :icon="Refresh" circle size="small" @click="handleRefreshMaps" :loading="refreshingMaps"
+                        title="刷新地图列表" class="refresh-btn" />
+                </div>
+            </template>
+            <div class="map-selector-content">
+                <div class="map-list">
+                    <div v-for="map in availableMaps" :key="map.folderName" class="map-item"
+                        :class="{ active: selectedMapForEdit?.folderName === map.folderName }"
+                        @click="selectMapForEdit(map)">
+                        <div class="map-item-content">
+                            <el-icon class="map-icon">
+                                <FolderOpened />
+                            </el-icon>
+                            <div class="map-info">
+                                <div class="map-name">{{ map.displayName }}</div>
+                                <div class="map-meta">
+                                    <span class="meta-item" v-if="map.createTime">创建时间: {{ map.createTime }}</span>
+                                    <span class="meta-item">路线数: {{ map.queueCount }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="map-item-actions" @click.stop>
+                            <el-icon v-if="selectedMapForEdit?.folderName === map.folderName" class="check-icon">
+                                <Check />
+                            </el-icon>
+                            <el-button type="danger" :icon="Delete" circle size="small" @click="handleDeleteMap(map)"
+                                title="删除地图" />
+                        </div>
+                    </div>
+                    <div v-if="availableMaps.length === 0" class="empty-maps">
+                        <el-icon :size="48" color="#ccc">
+                            <FolderOpened />
+                        </el-icon>
+                        <p>未找到地图文件夹</p>
+                        <p class="empty-hint">请确保 maps 文件夹下有地图文件夹，每个文件夹包含 map 和 queue 目录</p>
+                    </div>
+                </div>
+            </div>
+            <template #footer>
+                <el-button @click="showMapEditSelector = false">取消</el-button>
+                <el-button type="primary" @click="confirmMapEditSelection"
+                    :disabled="!selectedMapForEdit">确定</el-button>
             </template>
         </el-dialog>
 
         <!-- 地图编辑对话框 -->
-        <el-dialog 
-            v-model="showMapEditor" 
-            title="地图编辑" 
-            width="95%"
-            :close-on-click-modal="false"
-            class="map-editor-dialog"
-            top="2vh"
-        >
+        <el-dialog v-model="showMapEditor" title="地图编辑" width="95%" :close-on-click-modal="false"
+            class="map-editor-dialog" top="2vh">
             <div class="map-editor-content">
                 <div class="editor-toolbar">
                     <div class="toolbar-left">
-                        <el-select v-model="selectedMapFile" placeholder="选择要编辑的地图" @change="loadMapForEdit"
-                            style="width: 200px; margin-right: 10px;">
-                            <el-option v-for="map in availableMaps" :key="map" :label="map" :value="map" />
-                        </el-select>
-                        <el-button type="primary" :icon="Upload" @click="triggerFileInput" :disabled="editing">
-                            上传本地PGM
-                        </el-button>
-                        <input ref="fileInputRef" type="file" accept=".pgm" style="display: none"
-                            @change="handleFileSelect" />
+                        <span v-if="selectedMapForEdit" class="current-map-name">
+                            当前地图: {{ selectedMapForEdit.displayName }}
+                        </span>
                     </div>
                     <div class="toolbar-right">
                         <el-button-group>
@@ -121,11 +323,15 @@
                     </div>
                 </div>
 
-                <div class="map-canvas-container">
-                    <canvas v-if="mapLoaded || editing" ref="mapCanvasRef" @mousedown="handleMouseDownWithSave"
-                        @mousemove="handleMouseMove" @mouseup="handleMouseUp" @mouseleave="handleMouseUp"></canvas>
+                <div class="map-canvas-container" ref="canvasContainerRef" @mousemove="handleMouseMove"
+                    @mouseup="handleMouseUp" @mouseleave="handleMouseUp">
+                    <div v-if="mapLoaded || editing" class="canvas-wrapper"
+                        :style="{ transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }">
+                        <canvas ref="mapCanvasRef" @mousedown="handleMouseDownWithSave"
+                            @contextmenu.prevent="handleContextMenu" @mousedown.right="handleRightMouseDown"></canvas>
+                    </div>
                     <div v-else class="empty-editor">
-                        <p>请选择或上传地图文件</p>
+                        <p>请选择地图文件</p>
                     </div>
                 </div>
 
@@ -141,84 +347,84 @@
         </el-dialog>
 
         <!-- 保存地图对话框 -->
-        <el-dialog 
-            v-model="showSaveDialog" 
-            title="保存地图" 
-            width="500px"
-            :close-on-click-modal="false"
-        >
+        <el-dialog v-model="showSaveDialog" title="保存地图" width="500px" :close-on-click-modal="false">
             <div class="save-dialog-content">
                 <el-radio-group v-model="saveMode" @change="handleSaveModeChange">
                     <el-radio label="overwrite">覆盖原图</el-radio>
                     <el-radio label="new">保存为新文件</el-radio>
                 </el-radio-group>
-                
+
                 <div v-if="saveMode === 'new'" style="margin-top: 16px;">
-                    <el-input 
-                        v-model="saveFileName" 
-                        placeholder="输入文件名（不含扩展名）"
-                        clearable
-                    >
-                        <template #append>.pgm</template>
-                    </el-input>
+                    <el-form :model="saveMapNameForm" label-width="100px">
+                        <el-form-item label="地图名称" required>
+                            <el-input v-model="saveMapNameForm.name" placeholder="请输入地图名称" maxlength="50"
+                                show-word-limit />
+                        </el-form-item>
+                        <el-form-item label="描述（可选）">
+                            <el-input v-model="saveMapNameForm.description" type="textarea" :rows="3"
+                                placeholder="请输入地图描述" maxlength="200" show-word-limit />
+                        </el-form-item>
+                    </el-form>
                     <p style="font-size: 12px; color: #999; margin-top: 8px;">
-                        文件将保存到 /maps/ 文件夹
+                        将创建新地图文件夹，并复制原地图的其他文件（yaml、pcd等）
                     </p>
                 </div>
-                
+
                 <div v-else style="margin-top: 16px;">
-                    <el-alert
-                        :title="`将覆盖原文件: ${selectedMapFile}`"
-                        type="warning"
-                        :closable="false"
-                        show-icon
-                    />
+                    <el-alert :title="`将覆盖原文件: ${selectedMapForEdit?.mapPath || '未知'}`" type="warning" :closable="false"
+                        show-icon />
                 </div>
             </div>
             <template #footer>
                 <el-button @click="showSaveDialog = false">取消</el-button>
-                <el-button 
-                    type="primary" 
-                    @click="confirmSaveMap"
-                    :disabled="saving || (saveMode === 'new' && !saveFileName.trim())"
-                >
+                <el-button type="primary" @click="confirmSaveMap"
+                    :disabled="saving || (saveMode === 'new' && !saveMapNameForm.name.trim())">
                     {{ saving ? '保存中...' : '确定保存' }}
                 </el-button>
             </template>
         </el-dialog>
 
-        <!-- 地图切换对话框 -->
-        <el-dialog v-model="showMapSwitch" title="切换地图" width="400px">
-            <div class="map-switch-content">
-                <el-select v-model="switchToMap" placeholder="选择要切换的地图" style="width: 100%;">
-                    <el-option v-for="map in availableMaps" :key="map" :label="map" :value="map" />
-                </el-select>
-            </div>
-            <template #footer>
-                <el-button @click="showMapSwitch = false">取消</el-button>
-                <el-button type="primary" @click="confirmMapSwitch">确定</el-button>
-            </template>
-        </el-dialog>
     </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from 'vue'
-import { ElButton, ElButtonGroup, ElDialog, ElSelect, ElOption, ElIcon, ElMessage, ElInputNumber, ElRadioGroup, ElRadio, ElInput, ElAlert } from 'element-plus'
-import { Location, FolderOpened, Edit, Refresh, Document, Check, Upload, Delete, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
+import { ElButton, ElButtonGroup, ElDialog, ElSelect, ElOption, ElIcon, ElMessage, ElMessageBox, ElInputNumber, ElRadioGroup, ElRadio, ElInput, ElAlert, ElProgress, ElDivider, ElForm, ElFormItem, ElText } from 'element-plus'
+import { Location, FolderOpened, Edit, Document, Check, Upload, Delete, ZoomIn, ZoomOut, Refresh, Download } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
+import { createHttpFileTransferClient } from '@/utils/httpFileTransferUtils'
+import { fetchAllMaps, getQueueFiles, getMapFiles } from '@/utils/mapUtils'
+import type { MapInfo } from '@/types/map'
 
 const rosStore = useRosStore()
 
 // 响应式数据
 const showMapSelector = ref(false)
+const showMapEditSelector = ref(false)
 const showMapEditor = ref(false)
-const showMapSwitch = ref(false)
 const showSaveDialog = ref(false)
-const availableMaps = ref<string[]>([])
-const currentMap = ref<string>('')
+const showUploadMapDialog = ref(false)
+const showMapNameDialog = ref(false)
+const folderInputRef = ref<HTMLInputElement>()
+const selectedFolderFiles = ref<File[]>([])
+const folderStructure = ref<Record<string, string[]>>({})
+const folderValidation = ref<{ valid: boolean; message: string } | null>(null)
+const uploadingMap = ref(false)
+const uploadMapError = ref('')
+const newMapNameForm = ref({ name: '', description: '' })
+const downloadingFromRobot = ref(false)
+const downloadedRobotFiles = ref<Array<{ name: string; path: string; blob: Blob; localPath: string }>>([])
+const isFromRobot = ref(false)
+const showUploadMapProgress = ref(false)
+const uploadMapProgress = ref(0)
+const uploadMapStatusText = ref('准备上传...')
+const uploadMapCurrentFile = ref('')
+const uploadMapTotalFiles = ref(0)
+const uploadMapCompletedFiles = ref(0)
+const availableMaps = ref<MapInfo[]>([])
+const currentMap = ref<MapInfo | null>(null)
+const selectedMapForEdit = ref<MapInfo | null>(null)
 const selectedMapFile = ref<string>('')
-const switchToMap = ref<string>('')
 const mapCanvasRef = ref<HTMLCanvasElement>()
 const fileInputRef = ref<HTMLInputElement>()
 const editing = ref(false)
@@ -229,6 +435,19 @@ const brushSize = ref(5)
 const zoomLevel = ref(1.0)
 const saveMode = ref<'overwrite' | 'new'>('overwrite')
 const saveFileName = ref<string>('')
+const saveMapNameForm = ref({ name: '', description: '' })
+
+// 上传进度相关
+const showUploadProgress = ref(false)
+const uploadProgress = ref(0)
+const uploadStatusText = ref('准备发送...')
+const uploadCurrentFile = ref('')
+const uploadTotalFiles = ref(0)
+const uploadCompletedFiles = ref(0)
+const uploadWaiting = ref(false)
+const uploadWaitCountdown = ref(5)
+const isUploading = ref(false)
+const refreshingMaps = ref(false)
 
 // 绘制状态
 const isDrawing = ref(false)
@@ -238,43 +457,42 @@ const startX = ref(0)
 const startY = ref(0)
 const isSelecting = ref(false)
 
+// 拖动状态
+const isPanning = ref(false)
+const panStartX = ref(0)
+const panStartY = ref(0)
+const panOffset = ref({ x: 0, y: 0 })
+const canvasContainerRef = ref<HTMLElement>()
+
 // 计算属性
 const isConnected = computed(() => rosStore.connectionState.connected)
 
 // 获取可用地图列表
 const fetchAvailableMaps = async () => {
     try {
-        // 从 /maps/ 文件夹读取 pgm 文件列表
-        const response = await fetch('/maps/')
-        if (!response.ok) {
-            // 如果直接访问文件夹失败，尝试列出已知文件
-            // 或者通过 API 获取
-            console.warn('无法直接访问 /maps/ 文件夹，使用默认地图列表')
-            availableMaps.value = ['go2.pgm']
-            return
+        const maps = await fetchAllMaps()
+        availableMaps.value = maps
+        if (maps.length === 0) {
+            ElMessage.warning('未找到地图文件夹，请检查 maps 目录结构')
         }
-
-        const text = await response.text()
-        // 解析 HTML 响应，提取 .pgm 文件
-        const parser = new DOMParser()
-        const doc = parser.parseFromString(text, 'text/html')
-        const links = doc.querySelectorAll('a')
-        const maps: string[] = []
-
-        links.forEach(link => {
-            const href = link.getAttribute('href')
-            if (href && href.endsWith('.pgm')) {
-                // 只提取文件名，去掉路径前缀
-                const fileName = href.replace(/^.*\//, '')
-                maps.push(fileName)
-            }
-        })
-
-        availableMaps.value = maps.length > 0 ? maps : ['go2.pgm']
     } catch (error) {
         console.error('获取地图列表失败:', error)
-        // 使用默认地图
-        availableMaps.value = ['go2.pgm']
+        ElMessage.error('获取地图列表失败')
+        availableMaps.value = []
+    }
+}
+
+// 刷新地图列表
+const handleRefreshMaps = async () => {
+    refreshingMaps.value = true
+    try {
+        await fetchAvailableMaps()
+        ElMessage.success('地图列表已刷新')
+    } catch (error) {
+        console.error('刷新地图列表失败:', error)
+        ElMessage.error('刷新地图列表失败')
+    } finally {
+        refreshingMaps.value = false
     }
 }
 
@@ -288,46 +506,848 @@ const handleMapping = () => {
     // TODO: 实现建图功能，可能需要发布到 ROS 话题
 }
 
+// 上传地图
+const handleUploadMap = () => {
+    showUploadMapDialog.value = true
+    selectedFolderFiles.value = []
+    folderStructure.value = {}
+    folderValidation.value = null
+    uploadMapError.value = ''
+    newMapNameForm.value = { name: '', description: '' }
+    isFromRobot.value = false
+    downloadedRobotFiles.value = []
+    // 重置文件输入框
+    if (folderInputRef.value) {
+        folderInputRef.value.value = ''
+    }
+}
+
+// 关闭上传对话框
+const handleCloseUploadDialog = () => {
+    showUploadMapDialog.value = false
+    showMapNameDialog.value = false
+    // 重置状态
+    selectedFolderFiles.value = []
+    folderStructure.value = {}
+    folderValidation.value = null
+    uploadMapError.value = ''
+    newMapNameForm.value = { name: '', description: '' }
+    isFromRobot.value = false
+    downloadedRobotFiles.value = []
+    // 重置文件输入框
+    if (folderInputRef.value) {
+        folderInputRef.value.value = ''
+    }
+}
+
+// 关闭地图名称对话框
+const handleCloseMapNameDialog = () => {
+    showMapNameDialog.value = false
+}
+
+// 触发文件夹选择
+const triggerFolderSelect = () => {
+    folderInputRef.value?.click()
+}
+
+// 处理文件夹选择
+const handleFolderSelect = async (event: Event) => {
+    const target = event.target as HTMLInputElement
+    const files = Array.from(target.files || [])
+
+    if (files.length === 0) {
+        return
+    }
+
+    selectedFolderFiles.value = files
+    uploadMapError.value = ''
+
+    // 分析文件夹结构
+    const structure: Record<string, string[]> = {}
+    files.forEach(file => {
+        // 获取相对路径（去掉第一个目录名，因为那是文件夹名）
+        const pathParts = file.webkitRelativePath.split('/')
+        if (pathParts.length > 1) {
+            const dir = pathParts[1] // 第一级目录
+            if (!structure[dir]) {
+                structure[dir] = []
+            }
+            structure[dir].push(file.name)
+        }
+    })
+    folderStructure.value = structure
+
+    // 验证文件夹结构
+    validateFolderStructure(files)
+}
+
+// 验证文件夹结构
+const validateFolderStructure = (files: File[]) => {
+    const filePaths = files.map(f => f.webkitRelativePath.toLowerCase())
+
+    // 检查是否有 map 目录
+    const hasMapDir = filePaths.some(p => p.includes('/map/'))
+    // 检查是否有 queue 目录
+    const hasQueueDir = filePaths.some(p => p.includes('/queue/'))
+    // 检查 map 目录下是否有 pgm 文件
+    const hasPgmFile = filePaths.some(p => p.includes('/map/') && p.endsWith('.pgm'))
+    // 检查是否有配置文件
+    const hasConfig = filePaths.some(p => p.endsWith('config.json') || p.endsWith('map.json'))
+
+    const errors: string[] = []
+    if (!hasMapDir) {
+        errors.push('缺少 map 目录')
+    }
+    if (!hasQueueDir) {
+        errors.push('缺少 queue 目录')
+    }
+    if (!hasPgmFile) {
+        errors.push('map 目录下缺少 .pgm 文件')
+    }
+
+    if (errors.length > 0) {
+        folderValidation.value = {
+            valid: false,
+            message: `文件夹结构不符合要求: ${errors.join('; ')}`
+        }
+    } else {
+        folderValidation.value = {
+            valid: true,
+            message: '文件夹结构验证通过'
+        }
+    }
+}
+
+// 确认上传地图
+const confirmUploadMap = async () => {
+    if (!newMapNameForm.value.name.trim()) {
+        ElMessage.warning('请输入地图名称')
+        return
+    }
+
+    if (!folderValidation.value?.valid && !isFromRobot.value) {
+        ElMessage.warning('文件夹结构验证未通过')
+        return
+    }
+
+    uploadingMap.value = true
+    uploadMapError.value = ''
+
+    // 显示上传进度对话框
+    showUploadMapProgress.value = true
+    uploadMapProgress.value = 0
+    uploadMapStatusText.value = '准备上传...'
+    uploadMapCurrentFile.value = ''
+
+    // 计算总文件数
+    let totalFiles = 0
+    if (isFromRobot.value && downloadedRobotFiles.value.length > 0) {
+        totalFiles = downloadedRobotFiles.value.length
+    } else {
+        totalFiles = selectedFolderFiles.value.length
+    }
+    uploadMapTotalFiles.value = totalFiles
+    uploadMapCompletedFiles.value = 0
+
+    try {
+        // 生成文件夹名称（使用当前时间，格式：map_YYYYMMDD_HHmmss）
+        const now = new Date()
+        const year = now.getFullYear()
+        const month = String(now.getMonth() + 1).padStart(2, '0')
+        const day = String(now.getDate()).padStart(2, '0')
+        const hours = String(now.getHours()).padStart(2, '0')
+        const minutes = String(now.getMinutes()).padStart(2, '0')
+        const seconds = String(now.getSeconds()).padStart(2, '0')
+        const folderName = `map_${year}${month}${day}_${hours}${minutes}${seconds}`
+        const mapName = newMapNameForm.value.name.trim()
+        const description = newMapNameForm.value.description.trim()
+
+        // 创建 FormData 并上传所有文件
+        const formData = new FormData()
+        formData.append('folderName', folderName)
+        formData.append('mapName', mapName)
+        formData.append('description', description)
+
+        // 准备文件列表
+        const filesToUpload: Array<{ file: File | Blob; path: string; name: string }> = []
+
+        if (isFromRobot.value && downloadedRobotFiles.value.length > 0) {
+            // 从机器狗下载的文件
+            for (const file of downloadedRobotFiles.value) {
+                const fileObj = new File([file.blob], file.name, { type: file.blob.type })
+                filesToUpload.push({ file: fileObj, path: file.localPath, name: file.name })
+            }
+        } else {
+            // 本地选择的文件
+            selectedFolderFiles.value.forEach(file => {
+                const relativePath = file.webkitRelativePath
+                // 去掉第一级目录名（文件夹名），保留后续路径
+                const pathParts = relativePath.split('/')
+                if (pathParts.length > 1) {
+                    const targetPath = pathParts.slice(1).join('/')
+                    filesToUpload.push({ file, path: targetPath, name: file.name })
+                }
+            })
+        }
+
+        // 使用 XMLHttpRequest 上传以支持进度
+        return new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest()
+
+            // 监听上传进度
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const progress = (e.loaded / e.total) * 100
+                    uploadMapProgress.value = Math.min(99, progress)
+                    uploadMapStatusText.value = `正在上传文件... ${Math.round(progress)}%`
+                }
+            })
+
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        const result = JSON.parse(xhr.responseText)
+                        if (result.success) {
+                            uploadMapProgress.value = 100
+                            uploadMapStatusText.value = '上传完成'
+                            ElMessage.success(isFromRobot.value ? '地图已从机器狗上传成功' : '地图上传成功')
+                            showMapNameDialog.value = false
+                            showUploadMapDialog.value = false
+                            showUploadMapProgress.value = false
+                            // 重置所有状态
+                            isFromRobot.value = false
+                            downloadedRobotFiles.value = []
+                            selectedFolderFiles.value = []
+                            folderStructure.value = {}
+                            folderValidation.value = null
+                            uploadMapError.value = ''
+                            newMapNameForm.value = { name: '', description: '' }
+                            // 重置文件输入框
+                            if (folderInputRef.value) {
+                                folderInputRef.value.value = ''
+                            }
+                            // 刷新地图列表
+                            fetchAvailableMaps().then(() => resolve()).catch(reject)
+                        } else {
+                            throw new Error(result.error || '上传失败')
+                        }
+                    } catch (error) {
+                        reject(error instanceof Error ? error : new Error('解析响应失败'))
+                    }
+                } else {
+                    let errorMsg = `HTTP ${xhr.status}: ${xhr.statusText}`
+                    try {
+                        const errorResult = JSON.parse(xhr.responseText)
+                        if (errorResult.error) {
+                            errorMsg = errorResult.error
+                            if (errorResult.details) {
+                                errorMsg += ` (${JSON.stringify(errorResult.details)})`
+                            }
+                        }
+                    } catch (e) {
+                        // 忽略解析错误
+                    }
+                    reject(new Error(errorMsg))
+                }
+            })
+
+            xhr.addEventListener('error', () => {
+                reject(new Error('网络错误'))
+            })
+
+            xhr.addEventListener('abort', () => {
+                reject(new Error('上传已取消'))
+            })
+
+            // 添加文件到 FormData
+            // 注意：第三个参数应该是文件名，但我们需要保留路径信息
+            // 所以使用路径作为文件名，后端会解析路径
+            filesToUpload.forEach((item) => {
+                // 确保路径使用正斜杠（跨平台兼容）
+                const normalizedPath = item.path.replace(/\\/g, '/')
+                formData.append('files', item.file, normalizedPath)
+            })
+
+
+            uploadMapStatusText.value = '开始上传...'
+            xhr.open('POST', '/api/maps/upload-folder')
+            xhr.send(formData)
+        })
+    } catch (error) {
+        console.error('上传地图失败:', error)
+        uploadMapError.value = error instanceof Error ? error.message : '上传失败，请重试'
+        ElMessage.error(uploadMapError.value)
+        showUploadMapProgress.value = false
+        // 错误时也重置部分状态，但保留已选择的文件以便重试
+    } finally {
+        uploadingMap.value = false
+    }
+}
+
+// 从机器狗上传地图
+const handleDownloadFromRobot = async () => {
+    if (!isConnected.value) {
+        ElMessage.warning('请先连接到机器狗')
+        return
+    }
+
+    downloadingFromRobot.value = true
+    uploadMapError.value = ''
+
+    try {
+        const wsUrl = rosStore.connectionState.url
+        if (!wsUrl) {
+            throw new Error('未连接到机器狗')
+        }
+
+        // 创建 HTTP 文件传输客户端
+        const httpClient = createHttpFileTransferClient(wsUrl, 8080)
+
+        // 1. 列出机器狗 map 目录的文件
+        let mapFiles: Array<{ name: string; path: string }> = []
+        try {
+            const mapItems = await httpClient.listDirectory('map')
+            mapFiles = mapItems
+                .filter(item => item.type === 'file')
+                .filter(item => {
+                    const ext = item.name.toLowerCase().split('.').pop()
+                    return ['pgm', 'pcd', 'yaml', 'yml'].includes(ext || '')
+                })
+                .map(item => ({ name: item.name, path: `map/${item.name}` }))
+        } catch (error) {
+            console.warn('无法列出 map 目录:', error)
+            ElMessage.warning('无法访问机器狗的 map 目录')
+        }
+
+        // 2. 列出机器狗 queues 目录的文件
+        let queueFiles: Array<{ name: string; path: string }> = []
+        try {
+            const queueItems = await httpClient.listDirectory('queues')
+            queueFiles = queueItems
+                .filter(item => item.type === 'file')
+                .filter(item => item.name.toLowerCase().endsWith('.json'))
+                .map(item => ({ name: item.name, path: `queues/${item.name}` }))
+        } catch (error) {
+            console.warn('无法列出 queues 目录:', error)
+            ElMessage.warning('无法访问机器狗的 queues 目录')
+        }
+
+        if (mapFiles.length === 0 && queueFiles.length === 0) {
+            ElMessage.warning('机器狗上没有找到地图文件')
+            return
+        }
+
+        // 3. 下载所有文件
+        const allFiles: Array<{ name: string; path: string; blob: Blob; localPath: string }> = []
+
+        // 下载 map 目录的文件
+        for (const file of mapFiles) {
+            try {
+                const blob = await httpClient.downloadFile(file.path)
+                const localPath = `map/${file.name}`
+                allFiles.push({ name: file.name, path: file.path, blob, localPath })
+            } catch (error) {
+                console.error(`下载文件失败: ${file.path}`, error)
+            }
+        }
+
+        // 下载 queues 目录的文件
+        for (const file of queueFiles) {
+            try {
+                const blob = await httpClient.downloadFile(file.path)
+                const localPath = `queue/${file.name}`
+                allFiles.push({ name: file.name, path: file.path, blob, localPath })
+            } catch (error) {
+                console.error(`下载文件失败: ${file.path}`, error)
+            }
+        }
+
+        if (allFiles.length === 0) {
+            ElMessage.warning('没有成功下载任何文件')
+            return
+        }
+
+        // 4. 显示地图名称输入对话框
+        selectedFolderFiles.value = [] // 清空之前的选择
+        folderStructure.value = {
+            'map': mapFiles.map(f => f.name),
+            'queue': queueFiles.map(f => f.name)
+        }
+        folderValidation.value = {
+            valid: true,
+            message: `已从机器狗下载 ${allFiles.length} 个文件`
+        }
+
+        // 保存下载的文件到响应式变量，供 confirmUploadMap 使用
+        downloadedRobotFiles.value = allFiles
+        isFromRobot.value = true
+
+        // 显示地图名称对话框，等待用户输入并确认
+        // 用户点击"确认上传"按钮时会调用 confirmUploadMap 函数
+        showMapNameDialog.value = true
+
+        downloadingFromRobot.value = false
+    } catch (error) {
+        console.error('从机器狗下载地图失败:', error)
+        uploadMapError.value = error instanceof Error ? error.message : '从机器狗下载地图失败，请重试'
+        ElMessage.error(uploadMapError.value)
+    } finally {
+        downloadingFromRobot.value = false
+    }
+}
+
 // 地图编辑
 const handleMapEdit = () => {
-    showMapEditor.value = true
+    showMapEditSelector.value = true
+    selectedMapForEdit.value = null
     if (availableMaps.value.length === 0) {
         fetchAvailableMaps()
     }
 }
 
-// 地图切换
-const handleMapSwitch = () => {
-    showMapSwitch.value = true
-    switchToMap.value = currentMap.value
+// 选择地图用于编辑
+const selectMapForEdit = (map: MapInfo) => {
+    selectedMapForEdit.value = map
 }
 
+// 确认地图编辑选择
+const confirmMapEditSelection = async () => {
+    if (!selectedMapForEdit.value) {
+        ElMessage.warning('请先选择地图')
+        return
+    }
+
+    showMapEditSelector.value = false
+    showMapEditor.value = true
+
+    // 加载选中的地图
+    if (selectedMapForEdit.value.mapPath) {
+        await loadMapForEdit(selectedMapForEdit.value.mapPath)
+    }
+}
+
+// 删除地图
+const handleDeleteMap = async (map: MapInfo) => {
+    try {
+        await ElMessageBox.confirm(
+            `确定要删除地图 "${map.displayName}" 吗？\n此操作将删除该地图的所有文件，且无法恢复！`,
+            '确认删除',
+            {
+                confirmButtonText: '确定删除',
+                cancelButtonText: '取消',
+                type: 'warning',
+                dangerouslyUseHTMLString: false
+            }
+        )
+
+        // 调用删除API
+        const response = await fetch(`/api/maps/delete?folderName=${encodeURIComponent(map.folderName)}`, {
+            method: 'DELETE'
+        })
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: '删除失败' }))
+            throw new Error(errorData.error || `删除失败: HTTP ${response.status}`)
+        }
+
+        const result = await response.json()
+        if (result.success) {
+            ElMessage.success('地图删除成功')
+            // 刷新地图列表
+            await fetchAvailableMaps()
+            // 如果删除的是当前选中的地图，清空选择
+            if (selectedMapForEdit.value?.folderName === map.folderName) {
+                selectedMapForEdit.value = null
+            }
+            // 如果删除的是当前使用的地图，清空当前地图
+            if (currentMap.value?.folderName === map.folderName) {
+                currentMap.value = null
+            }
+        } else {
+            throw new Error(result.error || '删除失败')
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const errorMessage = error instanceof Error ? error.message : String(error)
+            console.error('删除地图失败:', error)
+            ElMessage.error(`删除地图失败: ${errorMessage}`)
+        }
+    }
+}
+
+
 // 选择地图
-const selectMap = (map: string) => {
+const selectMap = (map: MapInfo) => {
     currentMap.value = map
 }
 
-// 确认地图选择
-const confirmMapSelection = () => {
-    if (currentMap.value) {
-        ElMessage.success(`已选择地图: ${currentMap.value}`)
-        showMapSelector.value = false
-    } else {
-        ElMessage.warning('请先选择地图')
+// 发送文件到机器狗（使用 HTTP 传输）
+const sendMapToRobot = async (mapInfo: MapInfo) => {
+    if (!isConnected.value) {
+        ElMessage.warning('请先连接到机器狗')
+        return false
+    }
+
+    if (!mapInfo.mapPath) {
+        ElMessage.error('地图文件路径无效')
+        return false
+    }
+
+    // 初始化上传进度
+    isUploading.value = true
+    showUploadProgress.value = true
+    uploadProgress.value = 0
+    uploadStatusText.value = '准备发送...'
+    uploadCurrentFile.value = ''
+    uploadTotalFiles.value = 0
+    uploadCompletedFiles.value = 0
+    uploadWaiting.value = false
+    uploadWaitCountdown.value = 5
+
+    try {
+        // 初始化 HTTP 客户端
+        const wsUrl = rosStore.connectionState.url
+        if (!wsUrl) {
+            throw new Error('无法获取连接 URL，请先连接到机器狗')
+        }
+
+        // 验证 WebSocket URL 不是 localhost
+        try {
+            const url = new URL(wsUrl)
+            if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1') {
+                throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址（例如：ws://192.168.1.100:9090）')
+            }
+        } catch (error) {
+            if (error instanceof Error && error.message.includes('localhost')) {
+                throw error
+            }
+            // URL 解析失败，继续尝试
+        }
+
+        // 创建 HTTP 客户端，使用机器狗的 IP 和 8080 端口（不是本地 3000 端口）
+        const httpClient = createHttpFileTransferClient(wsUrl, 8080)
+
+        // 检查连接
+        const connected = await httpClient.checkConnection()
+        if (!connected) {
+            throw new Error('HTTP 文件服务未连接，请确保机器狗上已运行文件服务 API')
+        }
+
+        // 目标路径（相对于 BASE_DIR = /home/unitree/go2_nav/system）
+        // 根据后端 API，所有路径都是相对于 BASE_DIR 的
+        const mapDestinationPath = 'map'
+        const queueDestinationPath = 'queues'
+
+        // 1. 确保目标目录存在（必须在清理之前创建）
+        try {
+            await httpClient.createDirectory(mapDestinationPath)
+        } catch (error) {
+            // 目录可能已存在，忽略错误
+        }
+
+        try {
+            await httpClient.createDirectory(queueDestinationPath)
+        } catch (error) {
+            // 目录可能已存在，忽略错误
+        }
+
+        // 2. 删除目标目录中的现有文件
+        ElMessage.info('正在清理目标目录...')
+        try {
+            // 列出 map 目录中的文件并删除
+            try {
+                const mapFiles = await httpClient.listDirectory(mapDestinationPath)
+                for (const file of mapFiles) {
+                    if (file.type === 'file' && (
+                        file.name.endsWith('.pgm') ||
+                        file.name.endsWith('.pcd') ||
+                        file.name.endsWith('.yaml') ||
+                        file.name.endsWith('.yml')
+                    )) {
+                        try {
+                            // 使用 file.path（后端返回的相对路径）或构建路径
+                            // 后端返回的 path 已经是相对于 BASE_DIR 的路径
+                            const deletePath = file.path || `${mapDestinationPath}/${file.name}`
+                            await httpClient.deleteFile(deletePath)
+                        } catch (error) {
+                            // 忽略删除失败
+                        }
+                    }
+                }
+            } catch (error) {
+                // map 目录可能不存在或为空，忽略错误
+            }
+
+            // 列出 queues 目录中的文件并删除
+            try {
+                const queueFiles = await httpClient.listDirectory(queueDestinationPath)
+                for (const file of queueFiles) {
+                    if (file.type === 'file' && file.name.endsWith('.json')) {
+                        try {
+                            // 使用 file.path（后端返回的相对路径）或构建路径
+                            const deletePath = file.path || `${queueDestinationPath}/${file.name}`
+                            await httpClient.deleteFile(deletePath)
+                        } catch (error) {
+                            // 忽略删除失败
+                        }
+                    }
+                }
+            } catch (error) {
+                // queues 目录可能不存在或为空，忽略错误
+            }
+        } catch (error) {
+            // 继续执行，不中断流程
+        }
+
+        // 3. 读取本地文件的辅助函数（添加重试和超时机制）
+        const readLocalFile = async (url: string, retries = 3, timeout = 30000): Promise<Blob> => {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const controller = new AbortController()
+                    const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+                    const response = await fetch(url, {
+                        signal: controller.signal,
+                        cache: 'no-cache'
+                    })
+                    clearTimeout(timeoutId)
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+                    }
+
+                    const blob = await response.blob()
+                    return blob
+                } catch (error) {
+                    if (i === retries - 1) {
+                        throw error
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))) // 递增延迟
+                }
+            }
+            throw new Error('读取文件失败：已达到最大重试次数')
+        }
+
+        // 4. 发送 map 目录下的所有地图文件（pcd、pgm、yaml）
+        const mapFiles = await getMapFiles(mapInfo.folderName)
+        const queueFiles = await getQueueFiles(mapInfo.folderName)
+
+        // 计算总文件数和总大小
+        const totalFiles = mapFiles.length + queueFiles.length
+        uploadTotalFiles.value = totalFiles
+        uploadCompletedFiles.value = 0
+
+        // 计算所有文件的总大小（用于基于大小的进度计算）
+        let totalSize = 0
+        const fileSizes = new Map<string, number>()
+
+        // 获取所有文件的大小
+        for (const filePath of [...mapFiles, ...queueFiles]) {
+            try {
+                const response = await fetch(filePath, { method: 'HEAD' })
+                const size = parseInt(response.headers.get('content-length') || '0', 10)
+                fileSizes.set(filePath, size)
+                totalSize += size
+            } catch (error) {
+                // 如果无法获取大小，使用默认值（避免进度计算错误）
+                fileSizes.set(filePath, 0)
+            }
+        }
+
+        let uploadedSize = 0 // 已上传的总大小
+
+        if (mapFiles.length > 0) {
+            uploadStatusText.value = `正在发送地图文件 (${mapFiles.length} 个)...`
+
+            for (let i = 0; i < mapFiles.length; i++) {
+                const mapFilePath = mapFiles[i]
+                const mapFileName = mapFilePath.split('/').pop() || `map${i + 1}`
+                const fileExt = mapFileName.split('.').pop()?.toLowerCase() || ''
+                uploadCurrentFile.value = mapFileName
+
+                // 确定 MIME 类型
+                let mimeType = 'application/octet-stream'
+                if (fileExt === 'pgm') {
+                    mimeType = 'image/x-portable-graymap'
+                } else if (fileExt === 'yaml' || fileExt === 'yml') {
+                    mimeType = 'text/yaml'
+                } else if (fileExt === 'pcd') {
+                    mimeType = 'application/octet-stream'
+                }
+
+                try {
+                    // 使用重试机制读取文件
+                    const fileBlob = await readLocalFile(mapFilePath, 3, 30000)
+                    const file = new File([fileBlob], mapFileName, { type: mimeType })
+                    // 如果之前无法获取大小，使用实际文件大小，并更新总大小
+                    let fileSize = fileSizes.get(mapFilePath) || 0
+                    if (fileSize < 0) {
+                        fileSize = file.size
+                        fileSizes.set(mapFilePath, fileSize)
+                        totalSize += fileSize
+                    }
+
+                    await httpClient.uploadFile(
+                        file,
+                        mapDestinationPath,  // 相对于 BASE_DIR 的路径: 'map'
+                        (progress) => {
+                            // 基于文件大小计算整体进度
+                            if (totalSize > 0) {
+                                // 当前文件已上传的大小 = 文件大小 * 进度百分比
+                                const currentFileUploaded = (fileSize * progress) / 100
+                                // 总进度 = (已上传的总大小 + 当前文件已上传大小) / 总大小
+                                const currentTotalUploaded = uploadedSize + currentFileUploaded
+                                uploadProgress.value = Math.min(99, Math.round((currentTotalUploaded / totalSize) * 100))
+                            } else {
+                                // 回退到基于文件数量的进度计算
+                                const baseProgress = (uploadCompletedFiles.value / totalFiles) * 100
+                                const currentFileProgress = (progress / 100) / totalFiles * 100
+                                uploadProgress.value = Math.min(99, baseProgress + currentFileProgress)
+                            }
+                        }
+                    )
+
+                    // 文件上传完成，更新已上传大小
+                    uploadedSize += fileSize
+                    uploadCompletedFiles.value++
+                    uploadProgress.value = totalSize > 0 ? Math.round((uploadedSize / totalSize) * 100) : Math.round((uploadCompletedFiles.value / totalFiles) * 100)
+                } catch (error) {
+                    // 忽略浏览器扩展相关的错误
+                    const errorMessage = error instanceof Error ? error.message : String(error)
+                    if (!errorMessage.includes('content_script') && !errorMessage.includes('fetchError')) {
+                        console.error(`上传地图文件失败: ${mapFileName}`, error)
+                        ElMessage.warning(`上传 ${mapFileName} 失败，将继续上传其他文件`)
+                    }
+                    // 继续上传其他文件，但计入已完成
+                    const fileSize = fileSizes.get(mapFilePath) || 0
+                    uploadedSize += fileSize
+                    uploadCompletedFiles.value++
+                    uploadProgress.value = totalSize > 0 ? Math.round((uploadedSize / totalSize) * 100) : Math.round((uploadCompletedFiles.value / totalFiles) * 100)
+                }
+            }
+        }
+
+        // 5. 发送 queue 目录下的所有 JSON 文件
+        if (queueFiles.length > 0) {
+            uploadStatusText.value = `正在发送路线文件 (${queueFiles.length} 个)...`
+
+            for (let i = 0; i < queueFiles.length; i++) {
+                const queueFilePath = queueFiles[i]
+                const queueFileName = queueFilePath.split('/').pop() || `route${i + 1}.json`
+                uploadCurrentFile.value = queueFileName
+
+                try {
+                    // 使用重试机制读取路线文件
+                    const queueBlob = await readLocalFile(queueFilePath, 2, 15000)
+                    const queueFile = new File([queueBlob], queueFileName, { type: 'application/json' })
+                    // 如果之前无法获取大小，使用实际文件大小，并更新总大小
+                    let fileSize = fileSizes.get(queueFilePath) || 0
+                    if (fileSize < 0) {
+                        fileSize = queueFile.size
+                        fileSizes.set(queueFilePath, fileSize)
+                        totalSize += fileSize
+                    }
+
+                    await httpClient.uploadFile(
+                        queueFile,
+                        queueDestinationPath,  // 相对于 BASE_DIR 的路径: 'queues'
+                        (progress) => {
+                            // 基于文件大小计算整体进度
+                            if (totalSize > 0) {
+                                // 当前文件已上传的大小 = 文件大小 * 进度百分比
+                                const currentFileUploaded = (fileSize * progress) / 100
+                                // 总进度 = (已上传的总大小 + 当前文件已上传大小) / 总大小
+                                const currentTotalUploaded = uploadedSize + currentFileUploaded
+                                uploadProgress.value = Math.min(99, Math.round((currentTotalUploaded / totalSize) * 100))
+                            } else {
+                                // 回退到基于文件数量的进度计算
+                                const baseProgress = (uploadCompletedFiles.value / totalFiles) * 100
+                                const currentFileProgress = (progress / 100) / totalFiles * 100
+                                uploadProgress.value = Math.min(99, baseProgress + currentFileProgress)
+                            }
+                        }
+                    )
+
+                    // 文件上传完成，更新已上传大小
+                    uploadedSize += fileSize
+                    uploadCompletedFiles.value++
+                    uploadProgress.value = totalSize > 0 ? Math.round((uploadedSize / totalSize) * 100) : Math.round((uploadCompletedFiles.value / totalFiles) * 100)
+                } catch (error) {
+                    // 忽略浏览器扩展相关的错误
+                    const errorMessage = error instanceof Error ? error.message : String(error)
+                    if (!errorMessage.includes('content_script') && !errorMessage.includes('fetchError')) {
+                        console.error(`上传路线文件失败: ${queueFileName}`, error)
+                        ElMessage.warning(`上传 ${queueFileName} 失败，将继续上传其他文件`)
+                    }
+                    // 继续上传其他文件，但计入已完成
+                    const fileSize = fileSizes.get(queueFilePath) || 0
+                    uploadedSize += fileSize
+                    uploadCompletedFiles.value++
+                    uploadProgress.value = Math.round((uploadedSize / totalSize) * 100)
+                }
+            }
+        }
+
+        // 6. 等待5秒确保机器狗写入数据
+        uploadProgress.value = 100
+        uploadStatusText.value = '文件发送完成，等待机器狗处理数据...'
+        uploadCurrentFile.value = ''
+        uploadWaiting.value = true
+
+        for (let i = 5; i > 0; i--) {
+            uploadWaitCountdown.value = i
+            await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+
+        uploadWaiting.value = false
+        showUploadProgress.value = false
+        isUploading.value = false
+
+        ElMessage.success(`已成功发送到机器狗\n- 地图文件 (${mapFiles.length} 个)\n- 路线文件 (${queueFiles.length} 个)`)
+        return true
+    } catch (error) {
+        // 忽略浏览器扩展相关的错误
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        if (!errorMessage.includes('content_script') && !errorMessage.includes('fetchError')) {
+            console.error('发送地图文件失败:', error)
+            uploadWaiting.value = false
+            showUploadProgress.value = false
+            isUploading.value = false
+            ElMessage.error(`发送地图文件失败: ${errorMessage}`)
+            return false
+        }
+        // 如果是扩展错误，继续执行（可能已经成功）
+        uploadWaiting.value = false
+        showUploadProgress.value = false
+        isUploading.value = false
+        return true
     }
 }
 
-// 确认地图切换
-const confirmMapSwitch = () => {
-    if (switchToMap.value && switchToMap.value !== currentMap.value) {
-        currentMap.value = switchToMap.value
-        ElMessage.success(`已切换到地图: ${switchToMap.value}`)
-        showMapSwitch.value = false
-        // TODO: 实现实际的地图切换逻辑，可能需要加载新地图到 ROS
-    } else {
-        ElMessage.warning('请选择不同的地图')
+// 确认地图选择
+const confirmMapSelection = async () => {
+    if (!currentMap.value) {
+        ElMessage.warning('请先选择地图')
+        return
+    }
+
+    if (!isConnected.value) {
+        ElMessage.warning('请先连接到机器狗')
+        return
+    }
+
+    try {
+        // 发送文件到机器狗
+        const success = await sendMapToRobot(currentMap.value)
+        if (success) {
+            showMapSelector.value = false
+        }
+    } catch (error) {
+        console.error('确认地图选择失败:', error)
+        ElMessage.error('发送地图文件失败')
     }
 }
+
 
 // 解析PGM文件（支持二进制和ASCII格式）
 const parsePGM = async (arrayBuffer: ArrayBuffer): Promise<ImageData | null> => {
@@ -405,7 +1425,6 @@ const parsePGM = async (arrayBuffer: ArrayBuffer): Promise<ImageData | null> => 
             throw new Error(`无效的PGM文件头：尺寸或最大值无效 (${width}x${height}, max=${maxVal})`)
         }
 
-        console.log(`解析PGM文件: ${magic}, ${width}x${height}, max=${maxVal}, 数据开始位置: ${headerEnd}`)
 
         // 创建ImageData
         const imageData = new ImageData(width, height)
@@ -454,21 +1473,16 @@ const parsePGM = async (arrayBuffer: ArrayBuffer): Promise<ImageData | null> => 
             }
         }
 
-        console.log('PGM文件解析成功')
         return imageData
     } catch (error) {
         console.error('解析PGM文件失败:', error)
-        if (error instanceof Error) {
-            console.error('错误详情:', error.message)
-            console.error('堆栈:', error.stack)
-        }
         return null
     }
 }
 
 // 加载地图用于编辑
-const loadMapForEdit = async (mapName: string) => {
-    if (!mapName) {
+const loadMapForEdit = async (mapPath: string) => {
+    if (!mapPath) {
         ElMessage.warning('请选择地图文件')
         return
     }
@@ -477,20 +1491,26 @@ const loadMapForEdit = async (mapName: string) => {
         editing.value = true
         mapLoaded.value = false
 
-        // 如果mapName已经包含路径，去掉路径前缀，只保留文件名
-        let fileName = mapName
-        if (fileName.startsWith('/maps/')) {
-            fileName = fileName.replace(/^\/maps\//, '')
-        } else if (fileName.includes('/')) {
-            fileName = fileName.split('/').pop() || fileName
+        // mapPath 已经是完整路径，例如：/maps/map_20251202_200629/map/go2.pgm
+        // 直接使用它，或者确保路径正确
+        let url = mapPath
+        if (!url.startsWith('/')) {
+            url = '/' + url
+        }
+        if (!url.startsWith('/maps/')) {
+            url = '/maps/' + url
         }
 
-        console.log('开始加载地图:', mapName, '-> 文件名:', fileName)
-        const url = `/maps/${encodeURIComponent(fileName)}`
-        console.log('请求URL:', url)
+        // 对路径的各个部分分别编码（而不是整体编码）
+        const urlParts = url.split('/')
+        const encodedParts = urlParts.map((part, index) => {
+            // 第一个空字符串和 'maps' 不需要编码
+            if (index <= 1) return part
+            return encodeURIComponent(part)
+        })
+        url = encodedParts.join('/')
 
         const response = await fetch(url)
-        console.log('响应状态:', response.status, response.statusText)
 
         if (!response.ok) {
             const errorText = await response.text().catch(() => '')
@@ -499,10 +1519,8 @@ const loadMapForEdit = async (mapName: string) => {
         }
 
         const contentType = response.headers.get('content-type')
-        console.log('Content-Type:', contentType)
 
         const arrayBuffer = await response.arrayBuffer()
-        console.log('文件大小:', arrayBuffer.byteLength, '字节')
 
         if (arrayBuffer.byteLength === 0) {
             throw new Error('地图文件为空')
@@ -514,7 +1532,6 @@ const loadMapForEdit = async (mapName: string) => {
             throw new Error('解析地图文件失败，请检查文件格式是否正确')
         }
 
-        console.log('地图尺寸:', imageData.width, 'x', imageData.height)
 
         // 等待DOM更新，确保画布元素已渲染
         await nextTick()
@@ -557,13 +1574,15 @@ const loadMapForEdit = async (mapName: string) => {
             zoomLevel.value = 1.0
         }
 
-        const ctx = canvas.getContext('2d')
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
         if (!ctx) {
             throw new Error('无法获取画布上下文')
         }
 
         ctx.putImageData(imageData, 0, 0)
         mapLoaded.value = true
+        // 重置拖动偏移量
+        panOffset.value = { x: 0, y: 0 }
         ElMessage.success(`地图加载成功: ${imageData.width}x${imageData.height}`)
     } catch (error) {
         console.error('加载地图失败:', error)
@@ -606,7 +1625,7 @@ const handleFileSelect = async (event: Event) => {
         canvas.width = imageData.width
         canvas.height = imageData.height
 
-        const ctx = canvas.getContext('2d')
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
         if (ctx) {
             ctx.putImageData(imageData, 0, 0)
             mapLoaded.value = true
@@ -661,38 +1680,40 @@ const updateCanvasZoom = () => {
 // 获取画布坐标（考虑缩放）
 const getCanvasCoordinates = (event: MouseEvent): { x: number; y: number } | null => {
     if (!mapCanvasRef.value) return null
-    
+
     const canvas = mapCanvasRef.value
     const rect = canvas.getBoundingClientRect()
-    
+
     // 获取鼠标在画布显示区域内的相对位置（CSS坐标）
     const cssX = event.clientX - rect.left
     const cssY = event.clientY - rect.top
-    
+
     // 获取画布的实际像素尺寸和CSS显示尺寸
     const actualWidth = canvas.width
     const actualHeight = canvas.height
     const displayWidth = rect.width
     const displayHeight = rect.height
-    
+
     // 计算缩放比例
     const scaleX = actualWidth / displayWidth
     const scaleY = actualHeight / displayHeight
-    
+
     // 将CSS坐标转换为画布的实际像素坐标
     const pixelX = Math.floor(cssX * scaleX)
     const pixelY = Math.floor(cssY * scaleY)
-    
+
     // 确保坐标在画布范围内
     const x = Math.max(0, Math.min(pixelX, actualWidth - 1))
     const y = Math.max(0, Math.min(pixelY, actualHeight - 1))
-    
+
     return { x, y }
 }
 
-// 鼠标按下
+// 鼠标按下（左键）
 const handleMouseDown = (event: MouseEvent) => {
     if (!mapCanvasRef.value) return
+    // 如果是右键，不处理
+    if (event.button === 2) return
 
     const coords = getCanvasCoordinates(event)
     if (!coords) return
@@ -713,8 +1734,36 @@ const handleMouseDown = (event: MouseEvent) => {
     }
 }
 
+// 右键按下（用于拖动）
+const handleRightMouseDown = (event: MouseEvent) => {
+    if (!mapCanvasRef.value || !mapLoaded.value) return
+    if (event.button !== 2) return
+
+    event.preventDefault()
+    isPanning.value = true
+    panStartX.value = event.clientX
+    panStartY.value = event.clientY
+}
+
+// 阻止右键菜单
+const handleContextMenu = (event: MouseEvent) => {
+    event.preventDefault()
+}
+
 // 鼠标移动
 const handleMouseMove = (event: MouseEvent) => {
+    // 处理右键拖动
+    if (isPanning.value) {
+        const deltaX = event.clientX - panStartX.value
+        const deltaY = event.clientY - panStartY.value
+        panOffset.value.x += deltaX
+        panOffset.value.y += deltaY
+        panStartX.value = event.clientX
+        panStartY.value = event.clientY
+        return
+    }
+
+    // 处理左键绘制
     if (!isDrawing.value || !mapCanvasRef.value) return
 
     const coords = getCanvasCoordinates(event)
@@ -723,7 +1772,7 @@ const handleMouseMove = (event: MouseEvent) => {
     if (currentTool.value === 'rectangle') {
         // 框选：绘制预览矩形
         redrawCanvas()
-        const ctx = mapCanvasRef.value.getContext('2d')
+        const ctx = mapCanvasRef.value.getContext('2d', { willReadFrequently: true })
         if (ctx) {
             ctx.strokeStyle = '#409EFF'
             ctx.lineWidth = 2
@@ -746,6 +1795,13 @@ const handleMouseMove = (event: MouseEvent) => {
 
 // 鼠标释放
 const handleMouseUp = (event: MouseEvent) => {
+    // 处理右键拖动结束
+    if (isPanning.value) {
+        isPanning.value = false
+        return
+    }
+
+    // 处理左键绘制结束
     if (!isDrawing.value || !mapCanvasRef.value) return
 
     const coords = getCanvasCoordinates(event)
@@ -763,7 +1819,7 @@ const handleMouseUp = (event: MouseEvent) => {
 const drawAt = (x: number, y: number) => {
     if (!mapCanvasRef.value) return
 
-    const ctx = mapCanvasRef.value.getContext('2d')
+    const ctx = mapCanvasRef.value.getContext('2d', { willReadFrequently: true })
     if (!ctx) return
 
     ctx.save()
@@ -787,7 +1843,7 @@ const drawAt = (x: number, y: number) => {
 const drawLine = (x1: number, y1: number, x2: number, y2: number) => {
     if (!mapCanvasRef.value) return
 
-    const ctx = mapCanvasRef.value.getContext('2d')
+    const ctx = mapCanvasRef.value.getContext('2d', { willReadFrequently: true })
     if (!ctx) return
 
     ctx.save()
@@ -818,7 +1874,7 @@ const drawLine = (x1: number, y1: number, x2: number, y2: number) => {
 const fillRectangle = (x1: number, y1: number, x2: number, y2: number) => {
     if (!mapCanvasRef.value) return
 
-    const ctx = mapCanvasRef.value.getContext('2d')
+    const ctx = mapCanvasRef.value.getContext('2d', { willReadFrequently: true })
     if (!ctx) return
 
     const x = Math.min(x1, x2)
@@ -841,7 +1897,7 @@ let originalImageData: ImageData | null = null
 
 const saveCanvasState = () => {
     if (!mapCanvasRef.value) return
-    const ctx = mapCanvasRef.value.getContext('2d')
+    const ctx = mapCanvasRef.value.getContext('2d', { willReadFrequently: true })
     if (ctx) {
         originalImageData = ctx.getImageData(0, 0, mapCanvasRef.value.width, mapCanvasRef.value.height)
     }
@@ -853,7 +1909,7 @@ const redrawCanvas = () => {
         return
     }
 
-    const ctx = mapCanvasRef.value.getContext('2d')
+    const ctx = mapCanvasRef.value.getContext('2d', { willReadFrequently: true })
     if (ctx) {
         ctx.putImageData(originalImageData, 0, 0)
     }
@@ -865,7 +1921,7 @@ const handleMouseDownWithSave = handleMouseDown
 // 撤销操作
 const undoLastAction = () => {
     if (originalImageData && mapCanvasRef.value) {
-        const ctx = mapCanvasRef.value.getContext('2d')
+        const ctx = mapCanvasRef.value.getContext('2d', { willReadFrequently: true })
         if (ctx) {
             ctx.putImageData(originalImageData, 0, 0)
             saveCanvasState()
@@ -878,7 +1934,7 @@ const clearMap = () => {
     if (!mapCanvasRef.value) return
 
     const canvas = mapCanvasRef.value
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
     if (ctx) {
         saveCanvasState()
         ctx.fillStyle = '#FFFFFF'
@@ -891,7 +1947,7 @@ const invertMap = () => {
     if (!mapCanvasRef.value) return
 
     const canvas = mapCanvasRef.value
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
     if (!ctx) return
 
     saveCanvasState()
@@ -912,20 +1968,24 @@ const invertMap = () => {
 // 处理保存模式变化
 const handleSaveModeChange = () => {
     if (saveMode.value === 'new') {
-        // 生成默认文件名（基于原文件名）
-        const originalName = selectedMapFile.value || 'map'
-        const nameWithoutExt = originalName.replace(/\.pgm$/i, '')
-        saveFileName.value = `${nameWithoutExt}_edited`
+        // 生成默认地图名称（基于原地图名称）
+        if (selectedMapForEdit.value) {
+            saveMapNameForm.value.name = `${selectedMapForEdit.value.displayName}_副本`
+            saveMapNameForm.value.description = selectedMapForEdit.value.config?.description || ''
+        } else {
+            saveMapNameForm.value.name = '新地图'
+            saveMapNameForm.value.description = ''
+        }
     }
 }
 
 // 确认保存地图
 const confirmSaveMap = async () => {
-    if (saveMode.value === 'new' && !saveFileName.value.trim()) {
-        ElMessage.warning('请输入文件名')
+    if (saveMode.value === 'new' && !saveMapNameForm.value.name.trim()) {
+        ElMessage.warning('请输入地图名称')
         return
     }
-    
+
     await saveMap()
 }
 
@@ -937,7 +1997,7 @@ const saveMap = async () => {
         saving.value = true
 
         const canvas = mapCanvasRef.value
-        const ctx = canvas.getContext('2d')
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
         if (!ctx) {
             ElMessage.error('无法获取画布上下文')
             return
@@ -967,52 +2027,121 @@ const saveMap = async () => {
         pgmData.set(headerBytes, 0)
         pgmData.set(grayData, headerBytes.length)
 
-        // 确定保存的文件名
-        let fileName: string
         if (saveMode.value === 'overwrite') {
-            if (!selectedMapFile.value) {
+            // 覆盖模式：直接保存到原文件
+            if (!selectedMapForEdit.value || !selectedMapForEdit.value.mapPath) {
                 ElMessage.warning('无法覆盖：未选择原文件')
                 return
             }
-            fileName = selectedMapFile.value
-        } else {
-            // 确保文件名以.pgm结尾
-            fileName = saveFileName.value.trim()
-            if (!fileName.endsWith('.pgm')) {
-                fileName += '.pgm'
+            // 从mapPath中提取文件名（例如：/maps/folderName/map/file.pgm -> file.pgm）
+            const pathParts = selectedMapForEdit.value.mapPath.split('/')
+            const fileName = pathParts[pathParts.length - 1]
+            const targetFolder = selectedMapForEdit.value.folderName
+
+            // 创建FormData上传到服务器
+            const blob = new Blob([pgmData], { type: 'image/x-portable-graymap' })
+            const formData = new FormData()
+            formData.append('file', blob, fileName)
+            formData.append('folderName', targetFolder)
+
+            // 上传到服务器
+            const response = await fetch('/api/maps/upload', {
+                method: 'POST',
+                body: formData
+            })
+
+            if (!response.ok) {
+                throw new Error('保存失败')
             }
-        }
 
-        // 创建FormData上传到服务器
-        const blob = new Blob([pgmData], { type: 'image/x-portable-graymap' })
-        const formData = new FormData()
-        formData.append('file', blob, fileName)
-
-        // 上传到服务器
-        const response = await fetch('/api/maps/upload', {
-            method: 'POST',
-            body: formData
-        })
-
-        if (!response.ok) {
-            // 如果API不存在，降级为下载
-            console.warn('服务器上传失败，使用下载方式')
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = fileName
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            URL.revokeObjectURL(url)
-            ElMessage.success(`地图已下载: ${fileName}`)
+            ElMessage.success(`地图已保存到 /maps/${targetFolder}/map/${fileName}`)
+            await fetchAvailableMaps()
         } else {
+            // 保存为新文件：创建新地图文件夹并复制其他文件
+            if (!selectedMapForEdit.value) {
+                ElMessage.warning('未选择原地图')
+                return
+            }
+
+            const mapName = saveMapNameForm.value.name.trim()
+            const description = saveMapNameForm.value.description.trim()
+
+            // 生成新文件夹名称（使用当前时间）
+            const now = new Date()
+            const year = now.getFullYear()
+            const month = String(now.getMonth() + 1).padStart(2, '0')
+            const day = String(now.getDate()).padStart(2, '0')
+            const hours = String(now.getHours()).padStart(2, '0')
+            const minutes = String(now.getMinutes()).padStart(2, '0')
+            const seconds = String(now.getSeconds()).padStart(2, '0')
+            const newFolderName = `map_${year}${month}${day}_${hours}${minutes}${seconds}`
+
+            // 获取原地图文件夹下的所有文件
+            const originalMapFiles = await getMapFiles(selectedMapForEdit.value.folderName)
+            const originalQueueFiles = await getQueueFiles(selectedMapForEdit.value.folderName)
+
+            // 从原mapPath中提取原pgm文件名
+            const originalPathParts = selectedMapForEdit.value.mapPath.split('/')
+            const originalPgmName = originalPathParts[originalPathParts.length - 1]
+
+            // 创建FormData，包含新pgm文件和其他需要复制的文件
+            const formData = new FormData()
+            formData.append('folderName', newFolderName)
+            formData.append('mapName', mapName)
+            formData.append('description', description)
+
+            // 添加新的pgm文件
+            const blob = new Blob([pgmData], { type: 'image/x-portable-graymap' })
+            // 使用原文件名（如果原文件名存在），否则使用默认名称
+            const newPgmName = originalPgmName || 'map.pgm'
+            formData.append('files', blob, `map/${newPgmName}`)
+
+            // 复制原地图文件夹下的其他文件（yaml、pcd等，但不包括原pgm）
+            for (const filePath of originalMapFiles) {
+                if (filePath.endsWith('.pgm')) {
+                    // 跳过原pgm文件，使用新的
+                    continue
+                }
+                try {
+                    const response = await fetch(filePath)
+                    if (response.ok) {
+                        const fileBlob = await response.blob()
+                        const fileName = filePath.split('/').pop() || ''
+                        formData.append('files', fileBlob, `map/${fileName}`)
+                    }
+                } catch (error) {
+                    console.warn(`复制文件失败: ${filePath}`, error)
+                }
+            }
+
+            // 复制queue文件夹下的所有文件
+            for (const filePath of originalQueueFiles) {
+                try {
+                    const response = await fetch(filePath)
+                    if (response.ok) {
+                        const fileBlob = await response.blob()
+                        const fileName = filePath.split('/').pop() || ''
+                        formData.append('files', fileBlob, `queue/${fileName}`)
+                    }
+                } catch (error) {
+                    console.warn(`复制文件失败: ${filePath}`, error)
+                }
+            }
+
+            // 上传到服务器
+            const response = await fetch('/api/maps/save-new-map', {
+                method: 'POST',
+                body: formData
+            })
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: '保存失败' }))
+                throw new Error(errorData.error || '保存失败')
+            }
+
             const result = await response.json()
-            ElMessage.success(`地图已保存到 /maps/${fileName}`)
-            // 刷新地图列表
-            if (saveMode.value === 'new') {
-                await fetchAvailableMaps()
-            }
+            ElMessage.success(`新地图已创建: ${mapName}`)
+            await fetchAvailableMaps()
         }
 
         showSaveDialog.value = false
@@ -1045,9 +2174,65 @@ onMounted(() => {
     gap: 12px;
 }
 
+.button-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
 .tool-button {
-    width: 100%;
-    justify-content: flex-start;
+    width: 100% !important;
+    justify-content: flex-start !important;
+    text-align: left;
+}
+
+/* 确保所有按钮（包括disabled状态）都有相同的padding */
+.tool-button,
+.tool-button.is-disabled {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+}
+
+.tool-button :deep(.el-button__content) {
+    justify-content: flex-start !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+/* 确保disabled状态下的内容也对齐 */
+.tool-button.is-disabled :deep(.el-button__content) {
+    justify-content: flex-start !important;
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+}
+
+.tool-button :deep(.el-icon) {
+    margin-right: 8px !important;
+    margin-left: 0 !important;
+    flex-shrink: 0;
+    order: 1;
+}
+
+/* 确保disabled状态下的图标也对齐 */
+.tool-button.is-disabled :deep(.el-icon) {
+    margin-right: 8px !important;
+    margin-left: 0 !important;
+}
+
+.tool-button :deep(span) {
+    text-align: left !important;
+    margin-left: 0 !important;
+    order: 2;
+}
+
+/* 确保disabled状态下的文字也对齐 */
+.tool-button.is-disabled :deep(span) {
+    text-align: left !important;
+    margin-left: 0 !important;
 }
 
 .current-map-info {
@@ -1080,10 +2265,11 @@ onMounted(() => {
 .map-item {
     display: flex;
     align-items: center;
-    padding: 12px;
-    margin-bottom: 8px;
+    justify-content: space-between;
+    padding: 16px;
+    margin-bottom: 12px;
     border: 1px solid #e0e0e0;
-    border-radius: 4px;
+    border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
 }
@@ -1091,27 +2277,162 @@ onMounted(() => {
 .map-item:hover {
     background-color: #f5f5f5;
     border-color: #409EFF;
+    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.1);
 }
 
 .map-item.active {
     background-color: #ecf5ff;
     border-color: #409EFF;
+    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
 }
 
-.map-item .el-icon {
-    margin-right: 8px;
+.map-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.map-item-content {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 12px;
+}
+
+.map-item .map-icon {
+    font-size: 24px;
     color: #409EFF;
+    flex-shrink: 0;
+}
+
+.map-item .map-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.map-item .map-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.map-item .map-meta {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: #666;
+}
+
+.map-item .meta-item {
+    white-space: nowrap;
 }
 
 .map-item .check-icon {
-    margin-left: auto;
+    margin-left: 12px;
     color: #67c23a;
+    font-size: 20px;
+    flex-shrink: 0;
 }
 
 .empty-maps {
     text-align: center;
-    padding: 40px;
+    padding: 60px 40px;
     color: #999;
+}
+
+.empty-maps .el-icon {
+    margin-bottom: 16px;
+}
+
+.empty-maps p {
+    margin: 8px 0;
+    font-size: 14px;
+}
+
+.empty-maps .empty-hint {
+    font-size: 12px;
+    color: #bbb;
+    margin-top: 12px;
+    line-height: 1.6;
+}
+
+/* 对话框标题样式 */
+.dialog-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dialog-header .refresh-btn {
+    color: #333;
+    background-color: transparent;
+    border: none;
+}
+
+.dialog-header .refresh-btn .el-icon {
+    background-color: #fff;
+    border-radius: 50%;
+    padding: 5px;
+}
+
+.dialog-header .refresh-btn:hover {
+    background-color: transparent;
+}
+
+.dialog-header .refresh-btn:hover .el-icon {
+    background-color: #f0f0f0;
+}
+
+/* 上传进度对话框样式 */
+.upload-progress-content {
+    padding: 20px 0;
+}
+
+.progress-info {
+    margin-bottom: 20px;
+}
+
+.progress-text {
+    font-size: 16px;
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.progress-details {
+    font-size: 14px;
+    color: #666;
+}
+
+.progress-stats {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #f0f0f0;
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.stat-label {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 4px;
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: #409eff;
 }
 
 .map-editor-dialog {
@@ -1170,7 +2491,7 @@ onMounted(() => {
 .map-canvas-container {
     border: 1px solid #e0e0e0;
     border-radius: 4px;
-    overflow: auto;
+    overflow: hidden;
     flex: 1;
     min-height: 0;
     display: flex;
@@ -1185,6 +2506,13 @@ onMounted(() => {
     background-size: 20px 20px;
     background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
     padding: 20px;
+    position: relative;
+}
+
+.canvas-wrapper {
+    position: relative;
+    display: inline-block;
+    transition: none;
 }
 
 .map-canvas-container canvas {
@@ -1192,10 +2520,15 @@ onMounted(() => {
     background-color: white;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     display: block;
+    user-select: none;
     /* 不限制画布尺寸，让它显示完整 */
 }
 
 .map-canvas-container canvas:hover {
+    cursor: crosshair;
+}
+
+.map-canvas-container:has(canvas:hover) {
     cursor: crosshair;
 }
 

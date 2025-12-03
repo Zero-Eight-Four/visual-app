@@ -3,10 +3,13 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+# Note: package-lock.json should be committed for consistency
 
 # Build outputs
 dist/
 build/
+*.local
 
 # Environment variables
 .env
@@ -17,19 +20,67 @@ build/
 
 # IDE
 .github/
-.vscode/
+.vscode/*
 .idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Logs
 logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+.nyc_output/
+
+# Vite
+.vite/
+.vite-cache/
+
+# Cache
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# User uploaded files
+maps/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 
 # Temporary files
 *.tmp
 *.temp
+*.bak
+*.swp
+*~
+
+# Editor directories and files
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

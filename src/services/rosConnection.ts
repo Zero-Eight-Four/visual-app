@@ -8,12 +8,30 @@ import type { ConnectionConfig, RosMessage, TopicSubscription, RosTopic } from '
 // 使用动态导入避免构建时的类型问题
 let ROSLIB: any = null
 
-async function loadRoslib() {
-  if (!ROSLIB) {
-    // @ts-ignore
-    ROSLIB = await import('roslib')
+async function loadRoslib(retries = 3): Promise<any> {
+  if (ROSLIB) {
+    return ROSLIB
   }
-  return ROSLIB
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      // @ts-ignore
+      ROSLIB = await import('roslib')
+      return ROSLIB
+    } catch (error) {
+      const isLastAttempt = i === retries - 1
+      if (isLastAttempt) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        if (errorMessage.includes('Failed to fetch') || errorMessage.includes('ERR_CONNECTION_TIMED_OUT') || errorMessage.includes('ERR_NETWORK')) {
+          throw new Error('无法加载 roslib 模块：网络连接失败，请检查网络连接或刷新页面重试')
+        }
+        throw new Error(`无法加载 roslib 模块：${errorMessage}`)
+      }
+      // 等待后重试
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)))
+    }
+  }
+  throw new Error('无法加载 roslib 模块：重试次数已用完')
 }
 
 class RosConnection {

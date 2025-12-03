@@ -113,24 +113,31 @@ export function createArrow(
 /**
  * 创建文字精灵
  */
-export function createTextSprite(text: string, color = '#ffffff', fontSize = 48): THREE.Sprite {
+export function createTextSprite(text: string, color = '#ffffff', fontSize = 96): THREE.Sprite {
   const canvas = document.createElement('canvas')
   const context = canvas.getContext('2d')!
 
-  canvas.width = 256
-  canvas.height = 128
+  // 增大画布尺寸，使文字更清晰（放大2倍）
+  canvas.width = 512
+  canvas.height = 256
 
   context.fillStyle = color
-  context.font = `${fontSize}px Arial`
+  context.font = `bold ${fontSize}px Arial` // 使用粗体使文字更清晰
   context.textAlign = 'center'
   context.textBaseline = 'middle'
+  
+  // 添加文本描边以增强可见性
+  context.strokeStyle = '#000000'
+  context.lineWidth = 4
+  context.strokeText(text, canvas.width / 2, canvas.height / 2)
   context.fillText(text, canvas.width / 2, canvas.height / 2)
 
   const texture = new THREE.CanvasTexture(canvas)
   const material = new THREE.SpriteMaterial({ map: texture })
   const sprite = new THREE.Sprite(material)
 
-  sprite.scale.set(2, 1, 1)
+  // 增大sprite尺寸，使文字更清晰可见（放大2倍）
+  sprite.scale.set(4, 2, 1)
 
   return sprite
 }
