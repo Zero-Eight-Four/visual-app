@@ -693,11 +693,17 @@ export default defineConfig({
                   return
                 }
 
-                const filePath = join(videosDir, safeFileName)
+                // 创建以日期命名的文件夹（YYYYMMDD格式）
+                const now = new Date()
+                const dateFolder = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+                const dateDir = join(videosDir, dateFolder)
+                await mkdir(dateDir, { recursive: true })
+
+                const filePath = join(dateDir, safeFileName)
                 await writeFile(filePath, fileData)
 
                 res.setHeader('Content-Type', 'application/json')
-                res.end(JSON.stringify({ success: true, fileName: safeFileName }))
+                res.end(JSON.stringify({ success: true, fileName: safeFileName, folder: dateFolder }))
               } catch (error) {
                 console.error('Video upload error:', error)
                 res.statusCode = 500
@@ -725,39 +731,63 @@ export default defineConfig({
           }
         })
 
-        // API: 列出所有视频
+        // API: 列出所有视频（按日期文件夹组织）
         server.middlewares.use('/api/videos/list', async (req, res) => {
           try {
             const videosDir = join(process.cwd(), 'videos')
             await mkdir(videosDir, { recursive: true })
 
             const entries = await readdir(videosDir, { withFileTypes: true })
-            const videos = []
+            const folders: Array<{ folder: string; date: string; count: number; videos: Array<{ name: string; size: string; modified: string; folder: string }> }> = []
 
             for (const entry of entries) {
-              if (entry.isFile() && entry.name.endsWith('.webm')) {
-                const filePath = join(videosDir, entry.name)
-                const stats = statSync(filePath)
-                const sizeInMB = (stats.size / (1024 * 1024)).toFixed(2)
-                const modified = stats.mtime.toLocaleString('zh-CN')
+              if (entry.isDirectory() && /^\d{8}$/.test(entry.name)) {
+                // 是日期文件夹（YYYYMMDD格式）
+                const folderPath = join(videosDir, entry.name)
+                const videoEntries = await readdir(folderPath, { withFileTypes: true })
+                const videos: Array<{ name: string; size: string; modified: string; folder: string }> = []
 
-                videos.push({
-                  name: entry.name,
-                  size: `${sizeInMB} MB`,
-                  modified
+                for (const videoEntry of videoEntries) {
+                  if (videoEntry.isFile() && videoEntry.name.endsWith('.webm')) {
+                    const filePath = join(folderPath, videoEntry.name)
+                    const stats = statSync(filePath)
+                    const sizeInMB = (stats.size / (1024 * 1024)).toFixed(2)
+                    const modified = stats.mtime.toLocaleString('zh-CN')
+
+                    videos.push({
+                      name: videoEntry.name,
+                      size: `${sizeInMB} MB`,
+                      modified,
+                      folder: entry.name
+                    })
+                  }
+                }
+
+                // 按修改时间倒序排列
+                videos.sort((a, b) => {
+                  const aTime = statSync(join(folderPath, a.name)).mtime.getTime()
+                  const bTime = statSync(join(folderPath, b.name)).mtime.getTime()
+                  return bTime - aTime
+                })
+
+                // 格式化日期显示（YYYYMMDD -> YYYY-MM-DD）
+                const dateStr = entry.name
+                const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`
+
+                folders.push({
+                  folder: entry.name,
+                  date: formattedDate,
+                  count: videos.length,
+                  videos
                 })
               }
             }
 
-            // 按修改时间倒序排列
-            videos.sort((a, b) => {
-              const aTime = statSync(join(videosDir, a.name)).mtime.getTime()
-              const bTime = statSync(join(videosDir, b.name)).mtime.getTime()
-              return bTime - aTime
-            })
+            // 按日期倒序排列（最新的在前）
+            folders.sort((a, b) => b.folder.localeCompare(a.folder))
 
             res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ success: true, videos }))
+            res.end(JSON.stringify({ success: true, folders }))
           } catch (error) {
             res.statusCode = 500
             res.setHeader('Content-Type', 'application/json')
@@ -771,15 +801,23 @@ export default defineConfig({
             const videosDir = join(process.cwd(), 'videos')
             const url = new URL(req.url || '', `http://${req.headers.host}`)
             const fileName = url.searchParams.get('fileName') || ''
+            const folder = url.searchParams.get('folder') || ''
 
-            if (!fileName || fileName.includes('..') || fileName.includes('/')) {
+            if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
               res.statusCode = 400
               res.setHeader('Content-Type', 'application/json')
               res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
               return
             }
 
-            const filePath = join(videosDir, decodeURIComponent(fileName))
+            if (folder && (folder.includes('..') || folder.includes('/') || folder.includes('\\') || !/^\d{8}$/.test(folder))) {
+              res.statusCode = 400
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: 'Invalid folder name' }))
+              return
+            }
+
+            const filePath = folder ? join(videosDir, folder, decodeURIComponent(fileName)) : join(videosDir, decodeURIComponent(fileName))
 
             try {
               const stats = statSync(filePath)
@@ -849,15 +887,23 @@ export default defineConfig({
               try {
                 const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
                 const fileName = body.fileName || ''
+                const folder = body.folder || ''
 
-                if (!fileName || fileName.includes('..') || fileName.includes('/')) {
+                if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
                   res.statusCode = 400
                   res.setHeader('Content-Type', 'application/json')
                   res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
                   return
                 }
 
-                const filePath = join(videosDir, fileName)
+                if (folder && (folder.includes('..') || folder.includes('/') || folder.includes('\\') || !/^\d{8}$/.test(folder))) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'Invalid folder name' }))
+                  return
+                }
+
+                const filePath = folder ? join(videosDir, folder, fileName) : join(videosDir, fileName)
 
                 try {
                   await rm(filePath)

@@ -156,32 +156,44 @@
 
         <!-- 视频管理对话框 -->
         <el-dialog v-model="showVideoManagerDialog" title="视频管理" width="900px" @open="loadVideoList">
-            <el-table :data="videoList" :style="{ width: '100%' }" max-height="400">
-                <el-table-column prop="name" label="文件名" width="280" show-overflow-tooltip />
-                <el-table-column prop="size" label="大小" width="100" align="right" />
-                <el-table-column prop="modified" label="修改时间" width="180" />
-                <el-table-column label="操作" width="280" fixed="right">
+            <el-table :data="videoList" :style="{ width: '100%' }" max-height="500" row-key="folder" :default-expand-all="false" :expand-row-keys="defaultExpandKeys">
+                <el-table-column type="expand">
                     <template #default="{ row }">
-                        <div class="video-actions">
-                            <el-button size="small" @click="handleRenameVideo(row)">
-                                <el-icon style="margin-right: 4px;">
-                                    <Edit />
-                                </el-icon>
-                                重命名
-                            </el-button>
-                            <el-button size="small" type="primary" @click="handleDownloadVideo(row)">
-                                <el-icon style="margin-right: 4px;">
-                                    <Download />
-                                </el-icon>
-                                下载
-                            </el-button>
-                            <el-button size="small" type="danger" @click="handleDeleteVideo(row)">
-                                <el-icon style="margin-right: 4px;">
-                                    <Delete />
-                                </el-icon>
-                                删除
-                            </el-button>
-                        </div>
+                        <el-table :data="row.videos" :style="{ width: '100%' }" size="small">
+                            <el-table-column prop="name" label="文件名" width="250" show-overflow-tooltip />
+                            <el-table-column prop="size" label="大小" width="100" align="right" />
+                            <el-table-column prop="modified" label="修改时间" width="180" />
+                            <el-table-column label="操作" width="280" fixed="right">
+                                <template #default="{ row: video }">
+                                    <div class="video-actions">
+                                        <el-button size="small" @click="handleRenameVideo(video)">
+                                            <el-icon style="margin-right: 4px;">
+                                                <Edit />
+                                            </el-icon>
+                                            重命名
+                                        </el-button>
+                                        <el-button size="small" type="primary" @click="handleDownloadVideo(video)">
+                                            <el-icon style="margin-right: 4px;">
+                                                <Download />
+                                            </el-icon>
+                                            下载
+                                        </el-button>
+                                        <el-button size="small" type="danger" @click="handleDeleteVideo(video)">
+                                            <el-icon style="margin-right: 4px;">
+                                                <Delete />
+                                            </el-icon>
+                                            删除
+                                        </el-button>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="date" label="日期" width="150" />
+                <el-table-column prop="count" label="视频数量" width="120" align="center">
+                    <template #default="{ row }">
+                        <span>{{ row.count }} 个视频</span>
                     </template>
                 </el-table-column>
             </el-table>
@@ -301,10 +313,11 @@ const segmentStartTime = ref<number>(0)
 
 // 视频管理相关状态
 const showVideoManagerDialog = ref(false)
-const videoList = ref<Array<{ name: string; size: string; modified: string }>>([])
+const videoList = ref<Array<{ folder: string; date: string; count: number; videos: Array<{ name: string; size: string; modified: string; folder: string }> }>>([])
+const defaultExpandKeys = ref<string[]>([])
 const showRenameDialog = ref(false)
 const renameNewName = ref('')
-const renameCurrentVideo = ref<{ name: string } | null>(null)
+const renameCurrentVideo = ref<{ name: string; folder: string } | null>(null)
 
 // 获取 ImagePanel 的引用（通过 provide/inject）
 const imagePanelRef = inject<any>('imagePanelRef', null)
@@ -542,7 +555,11 @@ const loadVideoList = async () => {
         const result = await response.json()
 
         if (result.success) {
-            videoList.value = result.videos || []
+            videoList.value = result.folders || []
+            // 默认展开第一个文件夹
+            if (videoList.value.length > 0) {
+                defaultExpandKeys.value = [videoList.value[0].folder]
+            }
         } else {
             ElMessage.error('加载视频列表失败: ' + (result.error || '未知错误'))
         }
@@ -553,7 +570,7 @@ const loadVideoList = async () => {
 }
 
 // 重命名视频
-const handleRenameVideo = (video: { name: string }) => {
+const handleRenameVideo = (video: { name: string; folder: string }) => {
     renameCurrentVideo.value = video
     renameNewName.value = video.name.replace(/\.webm$/, '')
     showRenameDialog.value = true
@@ -574,7 +591,8 @@ const confirmRenameVideo = async () => {
             },
             body: JSON.stringify({
                 oldName: renameCurrentVideo.value.name,
-                newName: newFileName
+                newName: newFileName,
+                folder: renameCurrentVideo.value.folder
             })
         })
 
@@ -594,8 +612,8 @@ const confirmRenameVideo = async () => {
 }
 
 // 下载视频
-const handleDownloadVideo = (video: { name: string }) => {
-    const url = `/api/videos/download?fileName=${encodeURIComponent(video.name)}`
+const handleDownloadVideo = (video: { name: string; folder: string }) => {
+    const url = `/api/videos/download?fileName=${encodeURIComponent(video.name)}&folder=${encodeURIComponent(video.folder)}`
     const link = document.createElement('a')
     link.href = url
     link.download = video.name
@@ -605,7 +623,7 @@ const handleDownloadVideo = (video: { name: string }) => {
 }
 
 // 删除视频
-const handleDeleteVideo = async (video: { name: string }) => {
+const handleDeleteVideo = async (video: { name: string; folder: string }) => {
     try {
         await ElMessageBox.confirm(
             `确定要删除视频 "${video.name}" 吗？`,
@@ -622,7 +640,10 @@ const handleDeleteVideo = async (video: { name: string }) => {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ fileName: video.name })
+            body: JSON.stringify({ 
+                fileName: video.name,
+                folder: video.folder
+            })
         })
 
         const result = await response.json()
