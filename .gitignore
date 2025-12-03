@@ -64,6 +64,7 @@ coverage/
 
 # User uploaded files
 maps/
+videos/
 __pycache__/
 *.pyc
 *.pyo

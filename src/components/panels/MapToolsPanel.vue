@@ -27,7 +27,7 @@
             <!-- 当前地图显示 -->
             <div v-if="currentMap" class="current-map-info">
                 <div class="map-name">
-                    <span class="label">当前地图:</span>
+                <span class="label">当前地图:</span>
                     <span class="value">{{ currentMap.displayName }}</span>
                 </div>
                 <div class="map-details">
@@ -52,7 +52,7 @@
                         <div class="map-item-content">
                             <el-icon class="map-icon">
                                 <FolderOpened />
-                            </el-icon>
+                        </el-icon>
                             <div class="map-info">
                                 <div class="map-name">{{ map.displayName }}</div>
                                 <div class="map-meta">
@@ -384,17 +384,132 @@
             </template>
         </el-dialog>
 
+        <!-- 建图对话框 -->
+        <el-dialog v-model="showMappingConfirmDialog" :title="isMapping ? '建图中' : '开始建图'" width="500px"
+            :close-on-click-modal="false" @close="handleMappingDialogClose">
+            <div class="mapping-confirm-content">
+                <!-- 确认阶段：显示注意事项 -->
+                <div v-if="!isMapping">
+                    <el-alert type="warning" :closable="false" show-icon>
+                        <template #title>
+                            <div style="font-weight: bold; margin-bottom: 12px;">建图前请确认以下事项：</div>
+                        </template>
+                    </el-alert>
+                    <div class="mapping-notices">
+                        <div class="notice-item">
+                            <el-icon class="notice-icon">
+                                <Warning />
+                            </el-icon>
+                            <span><strong>确保现有地图已上传：</strong>建图会覆盖现有地图，确认无误后再开始建图</span>
+    </div>
+                        <div class="notice-item">
+                            <el-icon class="notice-icon">
+                                <Warning />
+                            </el-icon>
+                            <span><strong>确保导航已停止：</strong>建图前必须停止所有导航任务，避免冲突</span>
+                        </div>
+                        <div class="notice-item">
+                            <el-icon class="notice-icon">
+                                <Warning />
+                            </el-icon>
+                            <span><strong>建图范围不宜过大：</strong>建议在较小区域内进行建图，避免数据量过大导致处理缓慢</span>
+                        </div>
+                        <div class="notice-item">
+                            <el-icon class="notice-icon">
+                                <Warning />
+                            </el-icon>
+                            <span><strong>确保机器狗稳定：</strong>建图过程中请保持机器狗稳定，避免剧烈运动</span>
+                        </div>
+                        <div class="notice-item">
+                            <el-icon class="notice-icon">
+                                <InfoFilled />
+                            </el-icon>
+                            <span><strong>建图完成后：</strong>点击"停止建图"按钮将自动保存所有文件</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- 启动中阶段：显示启动状态 -->
+                <div v-else-if="mappingStarting" class="mapping-starting">
+                    <el-alert type="info" :closable="false" show-icon>
+                        <template #title>
+                            <div style="font-weight: bold; margin-bottom: 12px;">正在启动建图...</div>
+                        </template>
+                    </el-alert>
+                    <div class="mapping-status-content">
+                        <div class="status-info">
+                            <el-icon class="status-icon">
+                                <Location />
+                            </el-icon>
+                            <div class="status-text">
+                                <div class="status-title">等待建图启动</div>
+                                <div class="status-desc">正在启动建图进程，请稍候...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 建图中阶段：显示状态和停止按钮 -->
+                <div v-else class="mapping-status">
+                    <el-alert type="success" :closable="false" show-icon>
+                        <template #title>
+                            <div style="font-weight: bold; margin-bottom: 12px;">建图正在运行中...</div>
+                        </template>
+                    </el-alert>
+                    <div class="mapping-status-content">
+                        <div class="status-info">
+                            <el-icon class="status-icon">
+                                <Location />
+                            </el-icon>
+                            <div class="status-text">
+                                <div class="status-title">建图进行中</div>
+                                <div class="status-desc">正在构建地图</div>
+                            </div>
+                        </div>
+                        <div class="status-tips">
+                            <div class="tip-item">
+                                <el-icon>
+                                    <InfoFilled />
+                                </el-icon>
+                                <span>建图过程中请保持机器狗稳定移动</span>
+                            </div>
+                            <div class="tip-item">
+                                <el-icon>
+                                    <InfoFilled />
+                                </el-icon>
+                                <span>停止建图后将自动保存所有文件</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <template #footer>
+                <el-button v-if="!isMapping && !mappingStarting"
+                    @click="showMappingConfirmDialog = false">取消</el-button>
+                <el-button v-if="!isMapping" type="primary" @click="confirmStartMapping" :loading="mappingStarting"
+                    :disabled="mappingStarting">
+                    {{ mappingStarting ? '正在启动...' : '确认开始建图' }}
+                </el-button>
+                <el-button v-if="isMapping" type="danger" @click="handleStopMapping" :loading="mappingStopping"
+                    size="large">
+                    <el-icon style="margin-right: 5px;">
+                        <Delete />
+                    </el-icon>
+                    停止建图
+                </el-button>
+            </template>
+        </el-dialog>
+
     </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { ElButton, ElButtonGroup, ElDialog, ElSelect, ElOption, ElIcon, ElMessage, ElMessageBox, ElInputNumber, ElRadioGroup, ElRadio, ElInput, ElAlert, ElProgress, ElDivider, ElForm, ElFormItem, ElText } from 'element-plus'
-import { Location, FolderOpened, Edit, Document, Check, Upload, Delete, ZoomIn, ZoomOut, Refresh, Download } from '@element-plus/icons-vue'
+import { Location, FolderOpened, Edit, Document, Check, Upload, Delete, ZoomIn, ZoomOut, Refresh, Download, Warning, InfoFilled } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
 import { createHttpFileTransferClient } from '@/utils/httpFileTransferUtils'
 import { fetchAllMaps, getQueueFiles, getMapFiles } from '@/utils/mapUtils'
 import type { MapInfo } from '@/types/map'
+import { rosConnection } from '@/services/rosConnection'
 
 const rosStore = useRosStore()
 
@@ -496,14 +611,252 @@ const handleRefreshMaps = async () => {
     }
 }
 
+// 建图相关状态
+const showMappingConfirmDialog = ref(false)
+const mappingStarting = ref(false)
+const mappingStopping = ref(false)
+const isMapping = ref(false)
+
 // 建图功能
-const handleMapping = () => {
+const handleMapping = async () => {
     if (!isConnected.value) {
         ElMessage.warning('请先连接到机器狗')
         return
     }
-    ElMessage.info('建图功能开发中...')
-    // TODO: 实现建图功能，可能需要发布到 ROS 话题
+
+    // 打开对话框时，先订阅状态话题（确保能收到状态更新）
+    await subscribeMappingStatus()
+
+    // 等待一小段时间让状态消息到达（如果建图已经启动）
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    // 如果正在建图，直接打开对话框显示状态
+    if (isMapping.value) {
+        showMappingConfirmDialog.value = true
+        return
+    }
+    // 否则显示确认对话框
+    showMappingConfirmDialog.value = true
+}
+
+// 确认开始建图
+const confirmStartMapping = async () => {
+    try {
+        mappingStarting.value = true
+
+        // 先订阅建图状态话题（在发布命令之前订阅，确保能收到状态更新）
+        await subscribeMappingStatus()
+
+        // 等待一小段时间确保订阅已建立
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        // 发布开始建图命令到 /slam_manager/control 话题
+        await rosConnection.publish('/slam_manager/control', 'std_msgs/String', { data: 'start' })
+
+        ElMessage.success('等待建图程序启动...')
+
+        // 等待状态话题确认建图已启动（最多等待18秒，因为收到状态后还要等3秒）
+        let waitCount = 0
+        const maxWait = 36 // 36次 * 500ms = 18秒（15秒等待状态 + 3秒延迟显示）
+        const checkInterval = setInterval(() => {
+            waitCount++
+            if (isMapping.value) {
+                // 建图已启动（状态已切换，说明3秒延迟已完成）
+                clearInterval(checkInterval)
+                mappingStarting.value = false
+            } else if (waitCount >= maxWait) {
+                // 超时
+                clearInterval(checkInterval)
+                mappingStarting.value = false
+                ElMessage.warning('等待建图启动超时，请检查机器狗状态')
+            }
+        }, 500)
+    } catch (error) {
+        console.error('启动建图失败:', error)
+        ElMessage.error('启动建图失败: ' + (error instanceof Error ? error.message : '未知错误'))
+        mappingStarting.value = false
+        unsubscribeMappingStatus()
+    }
+}
+
+// 停止建图
+const handleStopMapping = async () => {
+    try {
+        await ElMessageBox.confirm(
+            '确定要停止建图吗？\n停止后将自动保存所有文件',
+            '确认停止建图',
+            {
+                confirmButtonText: '确定停止',
+                cancelButtonText: '取消',
+                type: 'warning',
+            }
+        )
+
+        mappingStopping.value = true
+
+        // 发布停止建图命令到 /slam_manager/control 话题
+        await rosConnection.publish('/slam_manager/control', 'std_msgs/String', { data: 'stop' })
+
+        ElMessage.success('已停止建图，正在保存文件...')
+
+        // 取消订阅状态话题
+        unsubscribeMappingStatus()
+
+        // 延迟后重置状态（给后端时间保存文件）
+        setTimeout(() => {
+            isMapping.value = false
+            showMappingConfirmDialog.value = false
+            ElMessage.success('建图已停止，文件已保存')
+        }, 3000)
+    } catch (error) {
+        if (error !== 'cancel') { // 忽略用户点击取消
+            console.error('停止建图失败:', error)
+            ElMessage.error('停止建图失败: ' + (error instanceof Error ? error.message : '未知错误'))
+        }
+    } finally {
+        mappingStopping.value = false
+    }
+}
+
+// 订阅建图状态话题
+let mappingStartTimeout: number | null = null
+let isSubscribedToMappingStatus = false
+
+const subscribeMappingStatus = async () => {
+    if (!isConnected.value) {
+        return
+    }
+
+    // 如果已经订阅，不需要重复订阅
+    if (isSubscribedToMappingStatus) {
+        return
+    }
+
+    try {
+        rosConnection.subscribe({
+            topic: '/slam_manager/status',
+        messageType: 'std_msgs/String',
+        callback: (message: any) => {
+            try {
+                    // 解析状态消息，后端返回的是 JSON 字符串格式
+                    // 格式：{"status":"mapping_running","is_mapping":true,"pid":123,"package":"fast_lio","file":"mapping_mid360.launch"}
+                    // 或：{"status":"mapping_stopped","is_mapping":false,"package":"fast_lio","file":"mapping_mid360.launch"}
+                    let statusObj: any = null
+                    let statusStr = ''
+
+                    // 获取消息数据
+                    let rawData = message.data || message
+
+                    // 如果是字符串，尝试解析为 JSON
+                    if (typeof rawData === 'string') {
+                        statusStr = rawData
+                        try {
+                            statusObj = JSON.parse(statusStr)
+                        } catch (e) {
+                            // 如果不是 JSON 字符串，可能是旧格式的字符串，忽略
+                        }
+                    } else if (typeof rawData === 'object' && rawData !== null) {
+                        // 如果已经是对象
+                        statusObj = rawData
+                        statusStr = JSON.stringify(statusObj)
+                } else {
+                        statusStr = String(rawData || '')
+                    }
+
+                    // 检查状态：优先使用 is_mapping 字段，其次使用 status 字段
+                    let isRunning = false
+                    let isStopped = false
+
+                    if (statusObj) {
+                        // JSON 对象格式
+                        // 优先使用 is_mapping 字段（更可靠）
+                        if (typeof statusObj.is_mapping === 'boolean') {
+                            isRunning = statusObj.is_mapping === true
+                            isStopped = statusObj.is_mapping === false
+                } else {
+                            // 如果没有 is_mapping 字段，使用 status 字段
+                            const status = statusObj.status || statusObj.Status || ''
+                            isRunning = status === 'mapping_running' || status === 'running'
+                            isStopped = status === 'mapping_stopped' || status === 'stopped'
+                        }
+                    } else {
+                        // 字符串格式（向后兼容旧格式）
+                        isRunning = statusStr.includes('status:mapping_running') || statusStr.includes('"status":"mapping_running"')
+                        isStopped = statusStr.includes('status:mapping_stopped') || statusStr.includes('"status":"mapping_stopped"')
+                    }
+
+                    if (isRunning) {
+                        // 建图已启动，等待3秒后再显示建图已启动窗口
+                        if (!isMapping.value) {
+                            // 如果已经设置了延迟定时器，不再重复设置（避免重复处理）
+                            if (mappingStartTimeout === null) {
+                                // 延迟3秒后切换状态
+                                mappingStartTimeout = window.setTimeout(() => {
+                                    isMapping.value = true
+                                    mappingStarting.value = false
+                                    mappingStartTimeout = null
+                                    ElMessage.success('建图已启动...')
+                                }, 3000)
+                            }
+                            // 如果定时器已存在，说明已经在等待中，不需要重复处理
+                        }
+                        // 如果 isMapping.value 已经是 true，说明状态已更新，不需要处理
+                    } else if (isStopped) {
+                        // 建图已停止
+                        // 清除延迟定时器（如果还在等待启动）
+                        if (mappingStartTimeout !== null) {
+                            clearTimeout(mappingStartTimeout)
+                            mappingStartTimeout = null
+                        }
+
+                        if (isMapping.value) {
+                            isMapping.value = false
+                            if (showMappingConfirmDialog.value) {
+                                showMappingConfirmDialog.value = false
+                                ElMessage.info('建图已停止')
+                            }
+                        }
+                    }
+                    // 移除了未识别状态的日志，因为会频繁触发
+            } catch (error) {
+                    console.error('解析建图状态失败:', error, message)
+                }
+            }
+        })
+
+        isSubscribedToMappingStatus = true
+    } catch (error) {
+        console.error('订阅建图状态失败:', error)
+        isSubscribedToMappingStatus = false
+    }
+}
+
+// 取消订阅建图状态话题
+const unsubscribeMappingStatus = () => {
+    try {
+        // 注意：这里不清除延迟定时器，因为可能正在等待状态更新
+        // 延迟定时器会在状态更新时自动清除，或在停止建图时清除
+
+        rosConnection.unsubscribe('/slam_manager/status')
+        isSubscribedToMappingStatus = false
+    } catch (error) {
+        console.error('取消订阅建图状态失败:', error)
+        isSubscribedToMappingStatus = false
+    }
+}
+
+// 对话框关闭时取消订阅
+const handleMappingDialogClose = () => {
+    // 只有在建图未运行时才取消订阅
+    // 如果建图正在运行，保持订阅以监控状态
+    if (!isMapping.value && !mappingStarting.value) {
+        unsubscribeMappingStatus()
+        // 清除延迟定时器（如果还在等待）
+        if (mappingStartTimeout !== null) {
+            clearTimeout(mappingStartTimeout)
+            mappingStartTimeout = null
+        }
+    }
 }
 
 // 上传地图
@@ -610,7 +963,7 @@ const validateFolderStructure = (files: File[]) => {
             valid: false,
             message: `文件夹结构不符合要求: ${errors.join('; ')}`
         }
-    } else {
+                } else {
         folderValidation.value = {
             valid: true,
             message: '文件夹结构验证通过'
@@ -962,11 +1315,11 @@ const handleDeleteMap = async (map: MapInfo) => {
             // 如果删除的是当前使用的地图，清空当前地图
             if (currentMap.value?.folderName === map.folderName) {
                 currentMap.value = null
-            }
-        } else {
+                }
+            } else {
             throw new Error(result.error || '删除失败')
-        }
-    } catch (error) {
+            }
+        } catch (error) {
         if (error !== 'cancel') {
             const errorMessage = error instanceof Error ? error.message : String(error)
             console.error('删除地图失败:', error)
@@ -990,7 +1343,7 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
 
     if (!mapInfo.mapPath) {
         ElMessage.error('地图文件路径无效')
-        return false
+            return false
     }
 
     // 初始化上传进度
@@ -1016,8 +1369,8 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             const url = new URL(wsUrl)
             if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1') {
                 throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址（例如：ws://192.168.1.100:9090）')
-            }
-        } catch (error) {
+        }
+    } catch (error) {
             if (error instanceof Error && error.message.includes('localhost')) {
                 throw error
             }
@@ -1314,7 +1667,7 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             showUploadProgress.value = false
             isUploading.value = false
             ElMessage.error(`发送地图文件失败: ${errorMessage}`)
-            return false
+        return false
         }
         // 如果是扩展错误，继续执行（可能已经成功）
         uploadWaiting.value = false
@@ -2038,19 +2391,19 @@ const saveMap = async () => {
             const fileName = pathParts[pathParts.length - 1]
             const targetFolder = selectedMapForEdit.value.folderName
 
-            // 创建FormData上传到服务器
-            const blob = new Blob([pgmData], { type: 'image/x-portable-graymap' })
-            const formData = new FormData()
-            formData.append('file', blob, fileName)
+        // 创建FormData上传到服务器
+        const blob = new Blob([pgmData], { type: 'image/x-portable-graymap' })
+        const formData = new FormData()
+        formData.append('file', blob, fileName)
             formData.append('folderName', targetFolder)
 
-            // 上传到服务器
-            const response = await fetch('/api/maps/upload', {
-                method: 'POST',
-                body: formData
-            })
+        // 上传到服务器
+        const response = await fetch('/api/maps/upload', {
+            method: 'POST',
+            body: formData
+        })
 
-            if (!response.ok) {
+        if (!response.ok) {
                 throw new Error('保存失败')
             }
 
@@ -2141,7 +2494,7 @@ const saveMap = async () => {
 
             const result = await response.json()
             ElMessage.success(`新地图已创建: ${mapName}`)
-            await fetchAvailableMaps()
+                await fetchAvailableMaps()
         }
 
         showSaveDialog.value = false
@@ -2542,6 +2895,133 @@ onMounted(() => {
 
 .save-dialog-content {
     padding: 10px 0;
+}
+
+/* 建图确认对话框样式 */
+.mapping-confirm-content {
+    padding: 10px 0;
+}
+
+.mapping-notices {
+    margin-top: 20px;
+}
+
+.notice-item {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 16px;
+    padding: 12px;
+    background-color: #f9f9f9;
+    border-radius: 4px;
+    border-left: 3px solid #e6a23c;
+}
+
+.notice-item:last-child {
+    margin-bottom: 0;
+    border-left-color: #409eff;
+}
+
+.notice-icon {
+    margin-right: 12px;
+    margin-top: 2px;
+    font-size: 18px;
+    color: #e6a23c;
+    flex-shrink: 0;
+}
+
+.notice-item:last-child .notice-icon {
+    color: #409eff;
+}
+
+.notice-item span {
+    flex: 1;
+    line-height: 1.6;
+    color: #333;
+    font-size: 14px;
+}
+
+.notice-item strong {
+    color: #303133;
+}
+
+/* 建图中状态样式 */
+.mapping-status {
+    padding: 10px 0;
+}
+
+.mapping-status-content {
+    margin-top: 20px;
+}
+
+.status-info {
+    display: flex;
+    align-items: center;
+    padding: 20px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.status-icon {
+    font-size: 48px;
+    color: #409eff;
+    margin-right: 20px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+}
+
+.status-text {
+    flex: 1;
+}
+
+.status-title {
+    font-size: 20px;
+    font-weight: bold;
+    color: #303133;
+    margin-bottom: 8px;
+}
+
+.status-desc {
+    font-size: 14px;
+    color: #606266;
+}
+
+.status-tips {
+    padding: 16px;
+    background-color: #f0f9ff;
+    border-radius: 4px;
+    border-left: 3px solid #409eff;
+}
+
+.tip-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    font-size: 14px;
+    color: #606266;
+}
+
+.tip-item:last-child {
+    margin-bottom: 0;
+}
+
+.tip-item .el-icon {
+    margin-right: 8px;
+    color: #409eff;
+    font-size: 16px;
 }
 
 .save-dialog-content .el-radio-group {

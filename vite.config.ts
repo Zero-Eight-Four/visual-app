@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
-import { readdir, writeFile, mkdir, rm, readFile } from 'fs/promises'
+import { readdir, writeFile, mkdir, rm, readFile, rename } from 'fs/promises'
 import { join, extname, dirname } from 'path'
 import { createReadStream, statSync } from 'fs'
 
@@ -576,6 +576,372 @@ export default defineConfig({
             res.statusCode = 500
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify({ success: false, error: 'Internal server error' }))
+          }
+        })
+
+        // API: 上传视频
+        server.middlewares.use('/api/videos/upload', async (req, res) => {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }))
+            return
+          }
+
+          try {
+            const videosDir = join(process.cwd(), 'videos')
+            await mkdir(videosDir, { recursive: true })
+
+            const chunks: Buffer[] = []
+
+            req.on('data', (chunk: Buffer) => {
+              chunks.push(chunk)
+            })
+
+            req.on('end', async () => {
+              try {
+                const buffer = Buffer.concat(chunks)
+                const contentType = req.headers['content-type'] || ''
+
+                if (!contentType.includes('multipart/form-data')) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'Invalid content type' }))
+                  return
+                }
+
+                const boundary = contentType.split('boundary=')[1]?.trim()
+                if (!boundary) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'No boundary found' }))
+                  return
+                }
+
+                // 解析 multipart/form-data
+                const boundaryMarker = `--${boundary}`
+                const boundaryBuffer = Buffer.from(boundaryMarker)
+                const parts: Buffer[] = []
+                
+                let searchIndex = 0
+                const boundaries: number[] = []
+                while (true) {
+                  const index = buffer.indexOf(boundaryBuffer, searchIndex)
+                  if (index === -1) break
+                  boundaries.push(index)
+                  searchIndex = index + boundaryBuffer.length
+                }
+
+                for (let i = 0; i < boundaries.length - 1; i++) {
+                  const start = boundaries[i] + boundaryBuffer.length
+                  const end = boundaries[i + 1]
+                  
+                  let partStart = start
+                  if (buffer[partStart] === 0x0D && buffer[partStart + 1] === 0x0A) {
+                    partStart += 2
+                  }
+                  
+                  let partEnd = end
+                  if (partEnd >= 2 && buffer[partEnd - 2] === 0x0D && buffer[partEnd - 1] === 0x0A) {
+                    partEnd -= 2
+                  }
+                  
+                  if (partEnd > partStart) {
+                    parts.push(buffer.subarray(partStart, partEnd))
+                  }
+                }
+
+                let fileName = ''
+                let fileData: Buffer | null = null
+
+                for (const part of parts) {
+                  const headerEndMarker = Buffer.from('\r\n\r\n')
+                  const headerEnd = part.indexOf(headerEndMarker)
+                  
+                  if (headerEnd > 0) {
+                    const header = part.toString('utf8', 0, headerEnd)
+                    const dataStart = headerEnd + 4
+                    let dataEnd = part.length
+                    if (dataEnd >= 2 && part[dataEnd - 2] === 0x0D && part[dataEnd - 1] === 0x0A) {
+                      dataEnd -= 2
+                    }
+                    const data = part.subarray(dataStart, dataEnd)
+
+                    if (header.includes('name="video"') && header.includes('filename=')) {
+                      const filenameMatch = header.match(/filename="([^"]+)"/) || header.match(/filename=([^\r\n]+)/)
+                      if (filenameMatch) {
+                        fileName = filenameMatch[1].trim()
+                        fileData = data
+                      }
+                    }
+                  }
+                }
+
+                if (!fileName || !fileData) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'No video file provided' }))
+                  return
+                }
+
+                // 确保文件名安全
+                const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
+                if (!safeFileName.endsWith('.webm')) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'Only .webm files are allowed' }))
+                  return
+                }
+
+                const filePath = join(videosDir, safeFileName)
+                await writeFile(filePath, fileData)
+
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ success: true, fileName: safeFileName }))
+              } catch (error) {
+                console.error('Video upload error:', error)
+                res.statusCode = 500
+                res.setHeader('Content-Type', 'application/json')
+                res.end(
+                  JSON.stringify({
+                    success: false,
+                    error: error instanceof Error ? error.message : 'Failed to save video'
+                  })
+                )
+              }
+            })
+
+            req.on('error', (error) => {
+              console.error('Request error:', error)
+              res.statusCode = 500
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: 'Request error' }))
+            })
+          } catch (error) {
+            console.error('Upload video API error:', error)
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: 'Internal server error' }))
+          }
+        })
+
+        // API: 列出所有视频
+        server.middlewares.use('/api/videos/list', async (req, res) => {
+          try {
+            const videosDir = join(process.cwd(), 'videos')
+            await mkdir(videosDir, { recursive: true })
+
+            const entries = await readdir(videosDir, { withFileTypes: true })
+            const videos = []
+
+            for (const entry of entries) {
+              if (entry.isFile() && entry.name.endsWith('.webm')) {
+                const filePath = join(videosDir, entry.name)
+                const stats = statSync(filePath)
+                const sizeInMB = (stats.size / (1024 * 1024)).toFixed(2)
+                const modified = stats.mtime.toLocaleString('zh-CN')
+
+                videos.push({
+                  name: entry.name,
+                  size: `${sizeInMB} MB`,
+                  modified
+                })
+              }
+            }
+
+            // 按修改时间倒序排列
+            videos.sort((a, b) => {
+              const aTime = statSync(join(videosDir, a.name)).mtime.getTime()
+              const bTime = statSync(join(videosDir, b.name)).mtime.getTime()
+              return bTime - aTime
+            })
+
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: true, videos }))
+          } catch (error) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: String(error) }))
+          }
+        })
+
+        // API: 下载视频
+        server.middlewares.use('/api/videos/download', async (req, res) => {
+          try {
+            const videosDir = join(process.cwd(), 'videos')
+            const url = new URL(req.url || '', `http://${req.headers.host}`)
+            const fileName = url.searchParams.get('fileName') || ''
+
+            if (!fileName || fileName.includes('..') || fileName.includes('/')) {
+              res.statusCode = 400
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
+              return
+            }
+
+            const filePath = join(videosDir, decodeURIComponent(fileName))
+
+            try {
+              const stats = statSync(filePath)
+              if (!stats.isFile()) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ success: false, error: 'File not found' }))
+                return
+              }
+
+              res.setHeader('Content-Type', 'video/webm')
+              res.setHeader('Content-Length', stats.size)
+              res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`)
+              
+              const stream = createReadStream(filePath)
+              stream.on('error', (err) => {
+                console.error('Stream error:', err)
+                if (!res.headersSent) {
+                  res.statusCode = 500
+                  res.end('Internal Server Error')
+                }
+              })
+              
+              req.on('close', () => {
+                if (!stream.destroyed) {
+                  stream.destroy()
+                }
+              })
+              
+              res.on('close', () => {
+                if (!stream.destroyed) {
+                  stream.destroy()
+                }
+              })
+              
+              stream.pipe(res)
+            } catch (error) {
+              res.statusCode = 404
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: 'File not found' }))
+            }
+          } catch (error) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: String(error) }))
+          }
+        })
+
+        // API: 删除视频
+        server.middlewares.use('/api/videos/delete', async (req, res) => {
+          if (req.method !== 'DELETE') {
+            res.statusCode = 405
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }))
+            return
+          }
+
+          try {
+            const videosDir = join(process.cwd(), 'videos')
+            const chunks: Buffer[] = []
+
+            req.on('data', (chunk: Buffer) => {
+              chunks.push(chunk)
+            })
+
+            req.on('end', async () => {
+              try {
+                const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+                const fileName = body.fileName || ''
+
+                if (!fileName || fileName.includes('..') || fileName.includes('/')) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
+                  return
+                }
+
+                const filePath = join(videosDir, fileName)
+
+                try {
+                  await rm(filePath)
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: true, message: 'Video deleted successfully' }))
+                } catch (error) {
+                  res.statusCode = 404
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'File not found' }))
+                }
+              } catch (error) {
+                res.statusCode = 400
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ success: false, error: 'Invalid request body' }))
+              }
+            })
+          } catch (error) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: String(error) }))
+          }
+        })
+
+        // API: 重命名视频
+        server.middlewares.use('/api/videos/rename', async (req, res) => {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }))
+            return
+          }
+
+          try {
+            const videosDir = join(process.cwd(), 'videos')
+            const chunks: Buffer[] = []
+
+            req.on('data', (chunk: Buffer) => {
+              chunks.push(chunk)
+            })
+
+            req.on('end', async () => {
+              try {
+                const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+                const oldName = body.oldName || ''
+                const newName = body.newName || ''
+
+                if (!oldName || !newName || oldName.includes('..') || newName.includes('..') || oldName.includes('/') || newName.includes('/')) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
+                  return
+                }
+
+                // 确保新文件名安全
+                const safeNewName = newName.replace(/[^a-zA-Z0-9._-]/g, '_')
+                if (!safeNewName.endsWith('.webm')) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'New file name must end with .webm' }))
+                  return
+                }
+
+                const oldPath = join(videosDir, oldName)
+                const newPath = join(videosDir, safeNewName)
+
+                try {
+                  await rename(oldPath, newPath)
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: true, newName: safeNewName }))
+                } catch (error) {
+                  res.statusCode = 404
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'File not found' }))
+                }
+              } catch (error) {
+                res.statusCode = 400
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ success: false, error: 'Invalid request body' }))
+              }
+            })
+          } catch (error) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: String(error) }))
           }
         })
 

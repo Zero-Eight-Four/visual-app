@@ -45,7 +45,7 @@
                         <h3>摄像头图像</h3>
                     </div>
                     <div class="panel-content">
-                        <ImagePanel :isExpanded="isImagePanelExpanded" @toggleExpand="toggleImagePanelExpand" />
+                        <ImagePanel ref="imagePanelRef" :isExpanded="isImagePanelExpanded" @toggleExpand="toggleImagePanelExpand" />
                     </div>
                 </div>
             </div>
@@ -170,8 +170,12 @@ import { useRosStore } from '@/stores/ros'
 // 3D面板引用
 const threeDPanelRef = ref()
 
+// 图像面板引用（用于录制功能）
+const imagePanelRef = ref<InstanceType<typeof ImagePanel> | null>(null)
+
 // 通过provide传递给设置面板
 provide('threeDPanelRef', threeDPanelRef)
+provide('imagePanelRef', imagePanelRef)
 
 // 当前选中的面板（默认显示任务规划）
 const selectedPanel = ref<'image' | '3d' | null>('3d')

@@ -357,8 +357,6 @@ const handleConnect = async () => {
 
         if (errorMessage.includes('无法加载') || errorMessage.includes('网络连接失败')) {
             userMessage = `模块加载失败！\n\n可能的原因：\n• 网络连接不稳定\n• Vite 开发服务器未运行\n• 浏览器缓存问题\n\n建议：\n• 检查网络连接\n• 刷新页面重试\n• 检查 Vite 服务器状态`
-        } else if (errorMessage.includes('无法加载') || errorMessage.includes('网络连接失败')) {
-            userMessage = `模块加载失败！\n\n可能的原因：\n• 网络连接不稳定\n• Vite 开发服务器未运行\n• 浏览器缓存问题\n\n建议：\n• 检查网络连接\n• 刷新页面重试\n• 检查 Vite 服务器状态`
         } else if (errorMessage.includes('超时')) {
             userMessage = `连接超时！\n\n请检查：\n• 机器狗是否开机\n• IP ${ip} 是否正确\n`
         } else if (errorMessage.includes('WebSocket')) {

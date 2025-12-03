@@ -324,6 +324,13 @@ const emit = defineEmits<{
     toggleExpand: []
 }>()
 
+// 暴露 canvas 引用和状态给父组件
+defineExpose({
+    imageCanvas,
+    hasImage,
+    selectedTopic
+})
+
 // 切换放大/缩小
 const toggleFullscreen = () => {
     emit('toggleExpand')
