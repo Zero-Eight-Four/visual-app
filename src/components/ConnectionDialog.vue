@@ -360,7 +360,11 @@ const handleConnect = async () => {
         } else if (errorMessage.includes('超时')) {
             userMessage = `连接超时！\n\n请检查：\n• 机器狗是否开机\n• IP ${ip} 是否正确\n`
         } else if (errorMessage.includes('WebSocket')) {
-            userMessage = `无法连接到 ${ip}:9090\n\n可能原因：\n• 机器狗未启动\n• 防火墙阻止连接\n• 网络不通`
+            // 提取更详细的错误信息
+            const lines = errorMessage.split('\n')
+            const mainError = lines[0]
+            const details = lines.slice(1).join('\n')
+            userMessage = `${mainError}\n\n${details || `无法连接到 ${ip}\n\n可能原因：\n• rosbridge_server 未运行\n• 端口不正确（默认9090）\n• 防火墙阻止连接\n• 网络不通`}`
         } else {
             userMessage = `连接失败: ${errorMessage}`
         }

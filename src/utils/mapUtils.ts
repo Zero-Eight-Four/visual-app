@@ -341,7 +341,13 @@ async function countQueueFiles(folderName: string): Promise<number> {
 export async function getQueueFiles(folderName: string): Promise<string[]> {
   try {
     const queueDirUrl = `/maps/${encodeURIComponent(folderName)}/queue/`
-    const response = await fetch(queueDirUrl)
+    // 添加超时处理
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超时
+    const response = await fetch(queueDirUrl, {
+      signal: controller.signal
+    })
+    clearTimeout(timeoutId)
     
     if (!response.ok) {
       return []
@@ -374,7 +380,13 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
 export async function getMapFiles(folderName: string): Promise<string[]> {
   try {
     const mapDirUrl = `/maps/${encodeURIComponent(folderName)}/map/`
-    const response = await fetch(mapDirUrl)
+    // 添加超时处理
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超时
+    const response = await fetch(mapDirUrl, {
+      signal: controller.signal
+    })
+    clearTimeout(timeoutId)
     
     if (!response.ok) {
       return []

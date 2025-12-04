@@ -94,14 +94,26 @@
                 <el-progress :percentage="Math.round(uploadProgress)"
                     :status="uploadProgress === 100 ? 'success' : undefined" :stroke-width="20"
                     :format="(percentage) => `${Math.round(percentage)}%`" style="margin-top: 20px;" />
-                <div class="progress-stats" v-if="uploadTotalFiles > 0">
-                    <div class="stat-item">
+                <div class="progress-stats" style="margin-top: 20px;">
+                    <div class="stat-item" v-if="uploadTotalSize > 0">
+                        <span class="stat-label">总大小:</span>
+                        <span class="stat-value">{{ formatFileSize(uploadTotalSize) }}</span>
+                    </div>
+                    <div class="stat-item" v-if="uploadSentSize > 0">
+                        <span class="stat-label">已发送:</span>
+                        <span class="stat-value">{{ formatFileSize(uploadSentSize) }}</span>
+                    </div>
+                    <div class="stat-item" v-if="uploadTotalFiles > 0">
                         <span class="stat-label">总文件数:</span>
                         <span class="stat-value">{{ uploadTotalFiles }}</span>
                     </div>
-                    <div class="stat-item">
+                    <div class="stat-item" v-if="uploadTotalFiles > 0">
                         <span class="stat-label">已完成:</span>
                         <span class="stat-value">{{ uploadCompletedFiles }}</span>
+                    </div>
+                    <div class="stat-item" v-if="uploadEta > 0 && uploadProgress < 100">
+                        <span class="stat-label">预计剩余:</span>
+                        <span class="stat-value">{{ formatTime(uploadEta) }}</span>
                     </div>
                     <div class="stat-item" v-if="uploadProgress === 100 && uploadWaiting">
                         <span class="stat-label">等待写入:</span>
@@ -196,24 +208,25 @@
         </el-dialog>
 
         <!-- 上传地图进度对话框 -->
-        <el-dialog v-model="showUploadMapProgress" title="上传地图" width="500px" :close-on-click-modal="false"
+        <el-dialog v-model="showUploadMapProgress" :title="isFromRobot ? '从机器狗上传地图' : '上传地图'" width="500px" :close-on-click-modal="false"
             :close-on-press-escape="false">
             <div class="upload-map-progress-content">
                 <div class="progress-text">{{ uploadMapStatusText }}</div>
-                <div class="progress-details" v-if="uploadMapCurrentFile">
-                    当前文件: {{ uploadMapCurrentFile }}
-                </div>
                 <el-progress :percentage="Math.round(uploadMapProgress)"
                     :status="uploadMapProgress === 100 ? 'success' : undefined" :stroke-width="20"
                     style="margin-top: 20px;" />
-                <div class="progress-stats" v-if="uploadMapTotalFiles > 0" style="margin-top: 20px;">
-                    <div class="stat-item">
-                        <span class="stat-label">总文件数:</span>
-                        <span class="stat-value">{{ uploadMapTotalFiles }}</span>
+                <div class="progress-stats" style="margin-top: 20px;">
+                    <div class="stat-item" v-if="uploadMapTotalSize > 0">
+                        <span class="stat-label">总大小:</span>
+                        <span class="stat-value">{{ formatFileSize(uploadMapTotalSize) }}</span>
                     </div>
-                    <div class="stat-item">
-                        <span class="stat-label">已完成:</span>
-                        <span class="stat-value">{{ uploadMapCompletedFiles }}</span>
+                    <div class="stat-item" v-if="uploadMapDownloadedSize > 0">
+                        <span class="stat-label">{{ isFromRobot ? '已上传' : '已上传' }}:</span>
+                        <span class="stat-value">{{ formatFileSize(uploadMapDownloadedSize) }}</span>
+                    </div>
+                    <div class="stat-item" v-if="uploadMapEta > 0 && uploadMapProgress < 100">
+                        <span class="stat-label">预计剩余:</span>
+                        <span class="stat-value">{{ formatTime(uploadMapEta) }}</span>
                     </div>
                 </div>
             </div>
@@ -347,7 +360,7 @@
         </el-dialog>
 
         <!-- 保存地图对话框 -->
-        <el-dialog v-model="showSaveDialog" title="保存地图" width="500px" :close-on-click-modal="false">
+        <el-dialog v-model="showSaveDialog" title="保存地图" width="500px" :close-on-click-modal="false" @open="handleSaveDialogOpen">
             <div class="save-dialog-content">
                 <el-radio-group v-model="saveMode" @change="handleSaveModeChange">
                     <el-radio label="overwrite">覆盖原图</el-radio>
@@ -528,7 +541,7 @@ const uploadingMap = ref(false)
 const uploadMapError = ref('')
 const newMapNameForm = ref({ name: '', description: '' })
 const downloadingFromRobot = ref(false)
-const downloadedRobotFiles = ref<Array<{ name: string; path: string; blob: Blob; localPath: string }>>([])
+const downloadedRobotFiles = ref<Array<{ name: string; path: string; localPath: string }>>([])
 const isFromRobot = ref(false)
 const showUploadMapProgress = ref(false)
 const uploadMapProgress = ref(0)
@@ -536,6 +549,34 @@ const uploadMapStatusText = ref('准备上传...')
 const uploadMapCurrentFile = ref('')
 const uploadMapTotalFiles = ref(0)
 const uploadMapCompletedFiles = ref(0)
+const uploadMapTotalSize = ref(0) // 总文件大小（字节）
+const uploadMapDownloadedSize = ref(0) // 已下载大小（字节）
+const uploadMapEta = ref(0) // 预计剩余时间（秒）
+
+// 格式化文件大小
+const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
+}
+
+// 格式化时间（秒）
+const formatTime = (seconds: number): string => {
+    if (seconds < 60) {
+        return `${Math.round(seconds)}秒`
+    } else if (seconds < 3600) {
+        const mins = Math.floor(seconds / 60)
+        const secs = Math.round(seconds % 60)
+        return `${mins}分${secs}秒`
+    } else {
+        const hours = Math.floor(seconds / 3600)
+        const mins = Math.floor((seconds % 3600) / 60)
+        return `${hours}小时${mins}分钟`
+    }
+}
+
 const availableMaps = ref<MapInfo[]>([])
 const currentMap = ref<MapInfo | null>(null)
 const selectedMapForEdit = ref<MapInfo | null>(null)
@@ -561,6 +602,9 @@ const uploadTotalFiles = ref(0)
 const uploadCompletedFiles = ref(0)
 const uploadWaiting = ref(false)
 const uploadWaitCountdown = ref(5)
+const uploadTotalSize = ref(0) // 总文件大小（字节）
+const uploadSentSize = ref(0) // 已发送大小（字节）
+const uploadEta = ref(0) // 预计剩余时间（秒）
 const isUploading = ref(false)
 const refreshingMaps = ref(false)
 
@@ -986,21 +1030,17 @@ const confirmUploadMap = async () => {
     uploadingMap.value = true
     uploadMapError.value = ''
 
-    // 显示上传进度对话框
+    // 显示进度对话框
     showUploadMapProgress.value = true
     uploadMapProgress.value = 0
-    uploadMapStatusText.value = '准备上传...'
+    uploadMapStatusText.value = isFromRobot.value ? '准备从机器狗上传到服务器...' : '准备从本地文件上传到服务器...'
     uploadMapCurrentFile.value = ''
-
-    // 计算总文件数
-    let totalFiles = 0
-    if (isFromRobot.value && downloadedRobotFiles.value.length > 0) {
-        totalFiles = downloadedRobotFiles.value.length
-    } else {
-        totalFiles = selectedFolderFiles.value.length
+    // 初始化文件大小和进度（如果不是从机器狗下载，会在后面计算）
+    if (!isFromRobot.value) {
+        uploadMapTotalSize.value = 0
+        uploadMapDownloadedSize.value = 0
+        uploadMapEta.value = 0
     }
-    uploadMapTotalFiles.value = totalFiles
-    uploadMapCompletedFiles.value = 0
 
     try {
         // 生成文件夹名称（使用当前时间，格式：map_YYYYMMDD_HHmmss）
@@ -1015,7 +1055,173 @@ const confirmUploadMap = async () => {
         const mapName = newMapNameForm.value.name.trim()
         const description = newMapNameForm.value.description.trim()
 
-        // 创建 FormData 并上传所有文件
+        // 如果是从机器狗下载，使用服务器端 API 直接下载并保存
+        if (isFromRobot.value && downloadedRobotFiles.value.length > 0) {
+            // 暂停心跳检测，避免文件传输期间心跳超时
+            rosConnection.pauseHeartbeat()
+
+            const wsUrl = rosStore.connectionState.url
+            if (!wsUrl) {
+                rosConnection.resumeHeartbeat()
+                throw new Error('未连接到机器狗')
+            }
+
+            // 从 WebSocket URL 提取机器狗的 HTTP URL
+            const wsUrlObj = new URL(wsUrl)
+            const robotHttpUrl = `http://${wsUrlObj.hostname}:8080`
+
+            // 初始化进度状态
+            uploadMapTotalSize.value = 0
+            uploadMapDownloadedSize.value = 0
+            uploadMapEta.value = 0
+            uploadMapProgress.value = 0
+            uploadMapStatusText.value = '准备从机器狗上传到服务器...'
+            ;(window as any).downloadStartTime = Date.now()
+
+            try {
+                // 调用服务器端 API，直接从机器狗下载并保存
+                const response = await fetch('/api/maps/download-from-robot', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        robotUrl: robotHttpUrl,
+                        files: downloadedRobotFiles.value.map(f => ({
+                            path: f.path,
+                            name: f.name,
+                            localPath: f.localPath
+                        })),
+                        folderName,
+                        mapName,
+                        description
+                    })
+                })
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => '')
+                    let errorMessage = `服务器端下载失败: HTTP ${response.status} - ${errorText || response.statusText}`
+                    
+                    // 解析错误信息，提供更友好的提示
+                    try {
+                        const errorData = JSON.parse(errorText)
+                        if (errorData.error) {
+                            errorMessage = errorData.error
+                            if (errorMessage.includes('无法连接到机器狗文件服务') || errorMessage.includes('ECONNREFUSED')) {
+                                errorMessage = '无法连接到机器狗文件服务，请确保：\n1. 机器狗上的文件传输服务正在运行 (file_transfer_api.py)\n2. 端口 8080 未被防火墙阻止\n3. 网络连接正常'
+                            }
+                        }
+                    } catch {
+                        // 如果无法解析 JSON，使用原始错误信息
+                    }
+                    
+                    throw new Error(errorMessage)
+                }
+
+                if (!response.body) {
+                    throw new Error('响应体为空')
+                }
+
+                // 读取 SSE 进度更新
+                const reader = response.body.getReader()
+                const decoder = new TextDecoder()
+                let buffer = ''
+
+                // eslint-disable-next-line no-constant-condition
+                while (true) {
+                    const { done, value } = await reader.read()
+                    if (done) break
+
+                    buffer += decoder.decode(value, { stream: true })
+                    const lines = buffer.split('\n')
+                    buffer = lines.pop() || ''
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6))
+
+                                if (data.type === 'init') {
+                                    uploadMapTotalSize.value = data.totalSize || 0
+                                    uploadMapDownloadedSize.value = 0
+                                    uploadMapEta.value = 0
+                                    uploadMapStatusText.value = `准备从机器狗上传到服务器: ${data.totalFiles} 个文件 (${formatFileSize(data.totalSize || 0)})...`
+                                    uploadMapProgress.value = 0
+                                } else if (data.type === 'fileStart') {
+                                    uploadMapStatusText.value = `正在从机器狗上传到服务器: ${data.fileName} (${data.fileIndex}/${data.totalFiles})`
+                                } else if (data.type === 'progress') {
+                                    uploadMapDownloadedSize.value = data.downloadedSize || 0
+                                    uploadMapProgress.value = data.progress || 0
+                                    uploadMapStatusText.value = `正在从机器狗上传到服务器: ${formatFileSize(data.downloadedSize || 0)} / ${formatFileSize(data.totalSize || 0)} (${Math.round(data.progress || 0)}%)`
+
+                                    // 计算 ETA
+                                    if (data.progress > 0 && data.progress < 100) {
+                                        const remaining = 100 - data.progress
+                                        const elapsed = Date.now() - (window as any).downloadStartTime || 0
+                                        if (elapsed > 0) {
+                                            const speed = data.progress / (elapsed / 1000)
+                                            const eta = remaining / speed
+                                            uploadMapEta.value = Math.max(0, eta)
+                                        }
+                                    }
+                                } else if (data.type === 'fileComplete') {
+                                    uploadMapDownloadedSize.value = data.downloadedSize || 0
+                                    uploadMapProgress.value = data.progress || 0
+                                    uploadMapStatusText.value = `已完成: ${data.fileName}`
+                                } else if (data.type === 'complete') {
+                                    uploadMapProgress.value = 100
+                                    uploadMapDownloadedSize.value = data.totalSize || 0
+                                    uploadMapEta.value = 0
+                                    uploadMapStatusText.value = `已从机器狗上传到服务器完成: ${formatFileSize(data.totalSize || 0)}`
+                                } else if (data.type === 'fileError') {
+                                    console.error(`下载文件失败: ${data.fileName}`, data.error)
+                                    // 检查是否是连接错误
+                                    const errorMsg = data.error || ''
+                                    if (errorMsg.includes('ECONNREFUSED') || errorMsg.includes('connect')) {
+                                        ElMessage.error(`无法连接到机器狗文件服务 (${data.fileName})，请确保机器狗上的文件传输服务正在运行`)
+                                    } else if (errorMsg.includes('timeout')) {
+                                        ElMessage.warning(`下载超时: ${data.fileName}，请检查网络连接`)
+                                    } else {
+                                        ElMessage.warning(`下载文件失败: ${data.fileName} - ${data.error}`)
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('解析进度数据失败:', e, line)
+                            }
+                        }
+                    }
+                }
+            } finally {
+                // 恢复心跳检测
+                rosConnection.resumeHeartbeat()
+            }
+
+            // 等待服务器处理完成
+            uploadMapStatusText.value = '已从机器狗上传到服务器完成，等待服务器处理...'
+            await new Promise(resolve => setTimeout(resolve, 2000))
+
+            // 刷新地图列表
+            try {
+                await fetchAvailableMaps()
+            } catch (error) {
+                console.warn('刷新地图列表失败:', error)
+            }
+
+            uploadMapStatusText.value = '完成'
+            ElMessage.success('地图已从机器狗下载成功')
+            showMapNameDialog.value = false
+            showUploadMapDialog.value = false
+            showUploadMapProgress.value = false
+
+            // 重置状态
+            isFromRobot.value = false
+            downloadedRobotFiles.value = []
+            newMapNameForm.value = { name: '', description: '' }
+
+            return
+        }
+
+        // 本地文件上传（原有逻辑）
         const formData = new FormData()
         formData.append('folderName', folderName)
         formData.append('mapName', mapName)
@@ -1024,63 +1230,169 @@ const confirmUploadMap = async () => {
         // 准备文件列表
         const filesToUpload: Array<{ file: File | Blob; path: string; name: string }> = []
 
-        if (isFromRobot.value && downloadedRobotFiles.value.length > 0) {
-            // 从机器狗下载的文件
-            for (const file of downloadedRobotFiles.value) {
-                const fileObj = new File([file.blob], file.name, { type: file.blob.type })
-                filesToUpload.push({ file: fileObj, path: file.localPath, name: file.name })
+        // 本地选择的文件
+        selectedFolderFiles.value.forEach(file => {
+            const relativePath = file.webkitRelativePath
+            // 去掉第一级目录名（文件夹名），保留后续路径
+            const pathParts = relativePath.split('/')
+            if (pathParts.length > 1) {
+                const targetPath = pathParts.slice(1).join('/')
+                filesToUpload.push({ file, path: targetPath, name: file.name })
             }
-        } else {
-            // 本地选择的文件
-            selectedFolderFiles.value.forEach(file => {
-                const relativePath = file.webkitRelativePath
-                // 去掉第一级目录名（文件夹名），保留后续路径
-                const pathParts = relativePath.split('/')
-                if (pathParts.length > 1) {
-                    const targetPath = pathParts.slice(1).join('/')
-                    filesToUpload.push({ file, path: targetPath, name: file.name })
+        })
+
+        // 计算总文件大小
+        let totalFileSize = 0
+        try {
+            for (const item of filesToUpload) {
+                if (item.file instanceof File || item.file instanceof Blob) {
+                    totalFileSize += item.file.size
                 }
-            })
+            }
+        } catch (e) {
+            // 忽略错误
         }
 
+        // 初始化进度状态
+        uploadMapTotalSize.value = totalFileSize
+        uploadMapDownloadedSize.value = 0
+        uploadMapEta.value = 0
+        uploadMapProgress.value = 0
+        uploadMapStatusText.value = `准备从本地文件上传到服务器: ${filesToUpload.length} 个文件 (${formatFileSize(totalFileSize)})...`
+        ;(window as any).uploadStartTime = Date.now()
+        let lastUpdateTime = Date.now()
+        let lastUploadedSize = 0
+
         // 使用 XMLHttpRequest 上传以支持进度
-        return new Promise<void>((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
             const xhr = new XMLHttpRequest()
+            
+            // 设置超时（30分钟，防止网络缓慢时误判为失败）
+            const timeout = setTimeout(() => {
+                xhr.abort()
+                reject(new Error('上传超时（30分钟），请检查网络连接后重试'))
+            }, 30 * 60 * 1000)
 
             // 监听上传进度
             xhr.upload.addEventListener('progress', (e) => {
                 if (e.lengthComputable) {
                     const progress = (e.loaded / e.total) * 100
-                    uploadMapProgress.value = Math.min(99, progress)
-                    uploadMapStatusText.value = `正在上传文件... ${Math.round(progress)}%`
+                    const uploadedSize = e.loaded
+                    const totalSize = e.total
+                    
+                    // 更新进度
+                    uploadMapProgress.value = Math.min(100, progress)
+                    uploadMapDownloadedSize.value = uploadedSize
+                    uploadMapTotalSize.value = totalSize
+                    uploadMapStatusText.value = `正在从本地文件上传到服务器: ${formatFileSize(uploadedSize)} / ${formatFileSize(totalSize)} (${Math.round(progress)}%)`
+
+                    // 计算 ETA
+                    const now = Date.now()
+                    const timeElapsed = (now - (window as any).uploadStartTime) / 1000 // 秒
+                    const sizeUploaded = uploadedSize - lastUploadedSize
+                    const timeSinceLastUpdate = (now - lastUpdateTime) / 1000
+
+                    if (timeSinceLastUpdate > 1 && sizeUploaded > 0 && progress < 100) {
+                        const speed = sizeUploaded / timeSinceLastUpdate // 字节/秒
+                        const remainingSize = totalSize - uploadedSize
+                        const eta = speed > 0 ? remainingSize / speed : 0
+                        uploadMapEta.value = Math.max(0, eta)
+                        lastUpdateTime = now
+                        lastUploadedSize = uploadedSize
+                    }
+
+                    // 如果上传完成，立即更新状态
+                    if (e.loaded >= e.total) {
+                        uploadMapProgress.value = 100
+                        uploadMapDownloadedSize.value = totalSize
+                        uploadMapEta.value = 0
+                        uploadMapStatusText.value = '上传完成，等待服务器响应...'
+                    }
+                } else {
+                    // 如果无法计算大小，至少显示进度百分比
+                    uploadMapStatusText.value = '正在上传文件...'
                 }
             })
 
             xhr.addEventListener('load', () => {
+                clearTimeout(timeout)
                 if (xhr.status >= 200 && xhr.status < 300) {
                     try {
                         const result = JSON.parse(xhr.responseText)
                         if (result.success) {
                             uploadMapProgress.value = 100
-                            uploadMapStatusText.value = '上传完成'
-                            ElMessage.success(isFromRobot.value ? '地图已从机器狗上传成功' : '地图上传成功')
-                            showMapNameDialog.value = false
-                            showUploadMapDialog.value = false
-                            showUploadMapProgress.value = false
-                            // 重置所有状态
-                            isFromRobot.value = false
-                            downloadedRobotFiles.value = []
-                            selectedFolderFiles.value = []
-                            folderStructure.value = {}
-                            folderValidation.value = null
-                            uploadMapError.value = ''
-                            newMapNameForm.value = { name: '', description: '' }
-                            // 重置文件输入框
-                            if (folderInputRef.value) {
-                                folderInputRef.value.value = ''
+                            uploadMapStatusText.value = '本地文件上传完成，等待服务器处理文件...'
+                            
+                            // 计算上传的文件总大小，用于确定等待时间
+                            let totalFileSize = 0
+                            try {
+                                for (const item of filesToUpload) {
+                                    if (item.file instanceof File || item.file instanceof Blob) {
+                                        totalFileSize += item.file.size
+                                    }
+                                }
+                            } catch (e) {
+                                // 忽略错误
                             }
-                            // 刷新地图列表
-                            fetchAvailableMaps().then(() => resolve()).catch(reject)
+                            
+                            const totalSizeMB = totalFileSize / 1024 / 1024
+                            // 对于大文件，需要等待服务器处理完成
+                            // 根据文件大小动态调整等待时间：>100MB: 10秒, >50MB: 5秒, 其他: 2秒
+                            const waitTime = totalSizeMB > 100 ? 10000 : totalSizeMB > 50 ? 5000 : 2000
+                            
+                            // 等待服务器处理大文件
+                            setTimeout(async () => {
+                                try {
+                                    uploadMapStatusText.value = '正在刷新地图列表...'
+                                    // 刷新地图列表，添加重试机制
+                                    let retries = 3
+                                    let success = false
+                                    
+                                    while (retries > 0 && !success) {
+                                        try {
+                                            await fetchAvailableMaps()
+                                            success = true
+                                        } catch (error) {
+                                            retries--
+                                            if (retries > 0) {
+                                                console.warn(`刷新地图列表失败，${retries}次重试剩余...`, error)
+                                                uploadMapStatusText.value = `刷新地图列表失败，正在重试... (剩余${retries}次)`
+                                                await new Promise(resolve => setTimeout(resolve, 2000))
+                                            } else {
+                                                console.error('刷新地图列表失败，已用完重试次数', error)
+                                                // 即使刷新失败，也认为上传成功
+                                                ElMessage.warning('地图上传成功，但刷新地图列表失败，请手动刷新')
+                                            }
+                                        }
+                                    }
+                                    
+                                    uploadMapStatusText.value = '上传完成'
+                                    ElMessage.success(isFromRobot.value ? '地图已从机器狗上传到服务器成功' : '地图已从本地文件上传到服务器成功')
+                                    showMapNameDialog.value = false
+                                    showUploadMapDialog.value = false
+                                    showUploadMapProgress.value = false
+                                    // 重置所有状态
+                                    isFromRobot.value = false
+                                    downloadedRobotFiles.value = []
+                                    selectedFolderFiles.value = []
+                                    folderStructure.value = {}
+                                    folderValidation.value = null
+                                    uploadMapError.value = ''
+                                    newMapNameForm.value = { name: '', description: '' }
+                                    // 重置文件输入框
+                                    if (folderInputRef.value) {
+                                        folderInputRef.value.value = ''
+                                    }
+                                    resolve()
+                                } catch (error) {
+                                    // 即使刷新失败，也认为上传成功
+                                    ElMessage.warning('地图上传成功，但刷新地图列表失败，请手动刷新')
+                                    showMapNameDialog.value = false
+                                    showUploadMapDialog.value = false
+                                    showUploadMapProgress.value = false
+                                    resolve() // 不拒绝，因为上传本身是成功的
+                                }
+                            }, waitTime)
                         } else {
                             throw new Error(result.error || '上传失败')
                         }
@@ -1089,6 +1401,16 @@ const confirmUploadMap = async () => {
                     }
                 } else {
                     let errorMsg = `HTTP ${xhr.status}: ${xhr.statusText}`
+                    // 为常见的服务器错误提供更友好的提示
+                    if (xhr.status === 502) {
+                        errorMsg = '服务器网关错误 (502)，可能是后端服务未启动或无法连接。请检查服务器状态。'
+                    } else if (xhr.status === 503) {
+                        errorMsg = '服务暂时不可用 (503)，请稍后重试。'
+                    } else if (xhr.status === 504) {
+                        errorMsg = '网关超时 (504)，服务器响应时间过长。请检查网络连接。'
+                    } else if (xhr.status >= 500) {
+                        errorMsg = `服务器错误 (${xhr.status})，请稍后重试或联系管理员。`
+                    }
                     try {
                         const errorResult = JSON.parse(xhr.responseText)
                         if (errorResult.error) {
@@ -1098,17 +1420,19 @@ const confirmUploadMap = async () => {
                             }
                         }
                     } catch (e) {
-                        // 忽略解析错误
+                        // 忽略解析错误，使用上面的默认错误消息
                     }
                     reject(new Error(errorMsg))
                 }
             })
 
             xhr.addEventListener('error', () => {
+                clearTimeout(timeout)
                 reject(new Error('网络错误'))
             })
 
             xhr.addEventListener('abort', () => {
+                clearTimeout(timeout)
                 reject(new Error('上传已取消'))
             })
 
@@ -1128,8 +1452,11 @@ const confirmUploadMap = async () => {
         })
     } catch (error) {
         console.error('上传地图失败:', error)
-        uploadMapError.value = error instanceof Error ? error.message : '上传失败，请重试'
-        ElMessage.error(uploadMapError.value)
+        const errorMessage = error instanceof Error ? error.message : '上传失败，请重试'
+        uploadMapError.value = errorMessage
+        uploadMapStatusText.value = '上传失败'
+        uploadMapProgress.value = 0
+        ElMessage.error(errorMessage)
         showUploadMapProgress.value = false
         // 错误时也重置部分状态，但保留已选择的文件以便重试
     } finally {
@@ -1156,8 +1483,8 @@ const handleDownloadFromRobot = async () => {
         // 创建 HTTP 文件传输客户端
         const httpClient = createHttpFileTransferClient(wsUrl, 8080)
 
-        // 1. 列出机器狗 map 目录的文件
-        let mapFiles: Array<{ name: string; path: string }> = []
+        // 1. 列出机器狗 map 目录的文件（包含大小信息）
+        let mapFiles: Array<{ name: string; path: string; size: number }> = []
         try {
             const mapItems = await httpClient.listDirectory('map')
             mapFiles = mapItems
@@ -1166,20 +1493,28 @@ const handleDownloadFromRobot = async () => {
                     const ext = item.name.toLowerCase().split('.').pop()
                     return ['pgm', 'pcd', 'yaml', 'yml'].includes(ext || '')
                 })
-                .map(item => ({ name: item.name, path: `map/${item.name}` }))
+                .map(item => ({ 
+                    name: item.name, 
+                    path: `map/${item.name}`,
+                    size: item.size || 0
+                }))
         } catch (error) {
             console.warn('无法列出 map 目录:', error)
             ElMessage.warning('无法访问机器狗的 map 目录')
         }
 
-        // 2. 列出机器狗 queues 目录的文件
-        let queueFiles: Array<{ name: string; path: string }> = []
+        // 2. 列出机器狗 queues 目录的文件（包含大小信息）
+        let queueFiles: Array<{ name: string; path: string; size: number }> = []
         try {
             const queueItems = await httpClient.listDirectory('queues')
             queueFiles = queueItems
                 .filter(item => item.type === 'file')
                 .filter(item => item.name.toLowerCase().endsWith('.json'))
-                .map(item => ({ name: item.name, path: `queues/${item.name}` }))
+                .map(item => ({ 
+                    name: item.name, 
+                    path: `queues/${item.name}`,
+                    size: item.size || 0
+                }))
         } catch (error) {
             console.warn('无法列出 queues 目录:', error)
             ElMessage.warning('无法访问机器狗的 queues 目录')
@@ -1190,37 +1525,39 @@ const handleDownloadFromRobot = async () => {
             return
         }
 
-        // 3. 下载所有文件
-        const allFiles: Array<{ name: string; path: string; blob: Blob; localPath: string }> = []
+        // 3. 计算总文件大小
+        const totalFiles = mapFiles.length + queueFiles.length
+        const totalSize = mapFiles.reduce((sum, f) => sum + f.size, 0) + 
+                         queueFiles.reduce((sum, f) => sum + f.size, 0)
 
-        // 下载 map 目录的文件
-        for (const file of mapFiles) {
-            try {
-                const blob = await httpClient.downloadFile(file.path)
-                const localPath = `map/${file.name}`
-                allFiles.push({ name: file.name, path: file.path, blob, localPath })
-            } catch (error) {
-                console.error(`下载文件失败: ${file.path}`, error)
-            }
-        }
-
-        // 下载 queues 目录的文件
-        for (const file of queueFiles) {
-            try {
-                const blob = await httpClient.downloadFile(file.path)
-                const localPath = `queue/${file.name}`
-                allFiles.push({ name: file.name, path: file.path, blob, localPath })
-            } catch (error) {
-                console.error(`下载文件失败: ${file.path}`, error)
-            }
-        }
-
-        if (allFiles.length === 0) {
-            ElMessage.warning('没有成功下载任何文件')
+        if (totalFiles === 0 || totalSize === 0) {
+            ElMessage.warning('机器狗上没有找到地图文件')
             return
         }
 
-        // 4. 显示地图名称输入对话框
+        // 准备文件列表信息（不下载到浏览器，只保存文件信息）
+        // 实际下载将在用户确认后通过服务器端 API 直接进行
+        const allFiles: Array<{ name: string; path: string; localPath: string }> = []
+        
+        // 准备 map 目录的文件信息
+        for (const file of mapFiles) {
+            const localPath = `map/${file.name}`
+            allFiles.push({ name: file.name, path: file.path, localPath })
+        }
+
+        // 准备 queues 目录的文件信息
+        for (const file of queueFiles) {
+            const localPath = `queue/${file.name}`
+            allFiles.push({ name: file.name, path: file.path, localPath })
+        }
+
+        if (allFiles.length === 0) {
+            ElMessage.warning('没有找到任何文件')
+            downloadingFromRobot.value = false
+            return
+        }
+
+        // 显示地图名称输入对话框
         selectedFolderFiles.value = [] // 清空之前的选择
         folderStructure.value = {
             'map': mapFiles.map(f => f.name),
@@ -1228,15 +1565,17 @@ const handleDownloadFromRobot = async () => {
         }
         folderValidation.value = {
             valid: true,
-            message: `已从机器狗下载 ${allFiles.length} 个文件`
+            message: `准备从机器狗下载 ${allFiles.length} 个文件 (${formatFileSize(totalSize)})`
         }
 
-        // 保存下载的文件到响应式变量，供 confirmUploadMap 使用
+        // 保存文件信息，供 confirmUploadMap 使用
+        // confirmUploadMap 会直接调用服务器端 API 下载并保存，不会先下载到浏览器
         downloadedRobotFiles.value = allFiles
         isFromRobot.value = true
 
         // 显示地图名称对话框，等待用户输入并确认
         // 用户点击"确认上传"按钮时会调用 confirmUploadMap 函数
+        // confirmUploadMap 会使用服务器端 API 直接从机器狗下载并保存到服务器
         showMapNameDialog.value = true
 
         downloadingFromRobot.value = false
@@ -1244,8 +1583,11 @@ const handleDownloadFromRobot = async () => {
         console.error('从机器狗下载地图失败:', error)
         uploadMapError.value = error instanceof Error ? error.message : '从机器狗下载地图失败，请重试'
         ElMessage.error(uploadMapError.value)
+        showUploadMapProgress.value = false
     } finally {
         downloadingFromRobot.value = false
+        // 恢复心跳检测
+        rosConnection.resumeHeartbeat()
     }
 }
 
@@ -1346,16 +1688,22 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             return false
     }
 
+    // 暂停心跳检测，避免文件传输期间心跳超时
+    rosConnection.pauseHeartbeat()
+
     // 初始化上传进度
     isUploading.value = true
     showUploadProgress.value = true
     uploadProgress.value = 0
-    uploadStatusText.value = '准备发送...'
-    uploadCurrentFile.value = ''
-    uploadTotalFiles.value = 0
-    uploadCompletedFiles.value = 0
-    uploadWaiting.value = false
-    uploadWaitCountdown.value = 5
+        uploadStatusText.value = '准备从服务器发送到机器狗...'
+        uploadCurrentFile.value = ''
+        uploadTotalFiles.value = 0
+        uploadCompletedFiles.value = 0
+        uploadWaiting.value = false
+        uploadWaitCountdown.value = 5
+        uploadTotalSize.value = 0
+        uploadSentSize.value = 0
+        uploadEta.value = 0
 
     try {
         // 初始化 HTTP 客户端
@@ -1379,12 +1727,19 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
 
         // 创建 HTTP 客户端，使用机器狗的 IP 和 8080 端口（不是本地 3000 端口）
         const httpClient = createHttpFileTransferClient(wsUrl, 8080)
+        
+        // 打印调试信息
+        console.log(`[sendMapToRobot] WebSocket URL: ${wsUrl}`)
+        console.log(`[sendMapToRobot] HTTP 客户端已创建，baseUrl: ${httpClient.getBaseUrl()}`)
 
         // 检查连接
+        console.log(`[sendMapToRobot] 检查 HTTP 连接...`)
         const connected = await httpClient.checkConnection()
         if (!connected) {
+            console.error(`[sendMapToRobot] HTTP 连接检查失败`)
             throw new Error('HTTP 文件服务未连接，请确保机器狗上已运行文件服务 API')
         }
+        console.log(`[sendMapToRobot] HTTP 连接检查成功`)
 
         // 目标路径（相对于 BASE_DIR = /home/unitree/go2_nav/system）
         // 根据后端 API，所有路径都是相对于 BASE_DIR 的
@@ -1404,12 +1759,33 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             // 目录可能已存在，忽略错误
         }
 
-        // 2. 删除目标目录中的现有文件
+        // 2. 删除目标目录中的现有文件（并行删除以提高速度）
         ElMessage.info('正在清理目标目录...')
+        
+        // 带超时的删除操作包装函数
+        const deleteFileWithTimeout = async (deletePath: string, timeout = 5000): Promise<void> => {
+            return Promise.race([
+                httpClient.deleteFile(deletePath),
+                new Promise<void>((_, reject) => 
+                    setTimeout(() => reject(new Error('删除操作超时')), timeout)
+                )
+            ]).catch(error => {
+                // 忽略超时和删除失败，不中断流程
+                console.warn(`删除文件超时或失败: ${deletePath}`, error)
+            })
+        }
+
         try {
-            // 列出 map 目录中的文件并删除
+            // 列出 map 目录中的文件并并行删除（添加超时保护）
             try {
-                const mapFiles = await httpClient.listDirectory(mapDestinationPath)
+                const mapFiles = await Promise.race([
+                    httpClient.listDirectory(mapDestinationPath),
+                    new Promise<never>((_, reject) => 
+                        setTimeout(() => reject(new Error('列出目录超时')), 10000)
+                    )
+                ]).catch(() => []) as Array<{ name: string; path: string; type: string }>
+                const deleteTasks: Array<Promise<void>> = []
+                
                 for (const file of mapFiles) {
                     if (file.type === 'file' && (
                         file.name.endsWith('.pgm') ||
@@ -1417,34 +1793,42 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
                         file.name.endsWith('.yaml') ||
                         file.name.endsWith('.yml')
                     )) {
-                        try {
-                            // 使用 file.path（后端返回的相对路径）或构建路径
-                            // 后端返回的 path 已经是相对于 BASE_DIR 的路径
-                            const deletePath = file.path || `${mapDestinationPath}/${file.name}`
-                            await httpClient.deleteFile(deletePath)
-                        } catch (error) {
-                            // 忽略删除失败
-                        }
+                        const deletePath = file.path || `${mapDestinationPath}/${file.name}`
+                        deleteTasks.push(deleteFileWithTimeout(deletePath))
                     }
                 }
+                
+                // 并行执行所有删除操作，等待完成（最多5秒）
+                await Promise.race([
+                    Promise.allSettled(deleteTasks),
+                    new Promise(resolve => setTimeout(resolve, 5000))
+                ])
             } catch (error) {
                 // map 目录可能不存在或为空，忽略错误
             }
 
-            // 列出 queues 目录中的文件并删除
+            // 列出 queues 目录中的文件并并行删除（添加超时保护）
             try {
-                const queueFiles = await httpClient.listDirectory(queueDestinationPath)
+                const queueFiles = await Promise.race([
+                    httpClient.listDirectory(queueDestinationPath),
+                    new Promise<never>((_, reject) => 
+                        setTimeout(() => reject(new Error('列出目录超时')), 10000)
+                    )
+                ]).catch(() => []) as Array<{ name: string; path: string; type: string }>
+                const deleteTasks: Array<Promise<void>> = []
+                
                 for (const file of queueFiles) {
                     if (file.type === 'file' && file.name.endsWith('.json')) {
-                        try {
-                            // 使用 file.path（后端返回的相对路径）或构建路径
-                            const deletePath = file.path || `${queueDestinationPath}/${file.name}`
-                            await httpClient.deleteFile(deletePath)
-                        } catch (error) {
-                            // 忽略删除失败
-                        }
+                        const deletePath = file.path || `${queueDestinationPath}/${file.name}`
+                        deleteTasks.push(deleteFileWithTimeout(deletePath))
                     }
                 }
+                
+                // 并行执行所有删除操作，等待完成（最多5秒）
+                await Promise.race([
+                    Promise.allSettled(deleteTasks),
+                    new Promise(resolve => setTimeout(resolve, 5000))
+                ])
             } catch (error) {
                 // queues 目录可能不存在或为空，忽略错误
             }
@@ -1452,198 +1836,194 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             // 继续执行，不中断流程
         }
 
-        // 3. 读取本地文件的辅助函数（添加重试和超时机制）
-        const readLocalFile = async (url: string, retries = 3, timeout = 30000): Promise<Blob> => {
-            for (let i = 0; i < retries; i++) {
-                try {
-                    const controller = new AbortController()
-                    const timeoutId = setTimeout(() => controller.abort(), timeout)
-
-                    const response = await fetch(url, {
-                        signal: controller.signal,
-                        cache: 'no-cache'
-                    })
-                    clearTimeout(timeoutId)
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-                    }
-
-                    const blob = await response.blob()
-                    return blob
-                } catch (error) {
-                    if (i === retries - 1) {
-                        throw error
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))) // 递增延迟
-                }
-            }
-            throw new Error('读取文件失败：已达到最大重试次数')
-        }
-
-        // 4. 发送 map 目录下的所有地图文件（pcd、pgm、yaml）
+        // 3. 使用服务器端流式转发（更高效，不经过浏览器）
+        console.log(`[sendMapToRobot] 获取地图文件列表，地图名称: ${mapInfo.folderName}`)
         const mapFiles = await getMapFiles(mapInfo.folderName)
         const queueFiles = await getQueueFiles(mapInfo.folderName)
+        console.log(`[sendMapToRobot] 找到 ${mapFiles.length} 个地图文件，${queueFiles.length} 个路线文件`)
 
-        // 计算总文件数和总大小
+        // 计算总文件数
         const totalFiles = mapFiles.length + queueFiles.length
         uploadTotalFiles.value = totalFiles
         uploadCompletedFiles.value = 0
+        uploadProgress.value = 0
+        uploadStatusText.value = '准备发送...'
+        uploadCurrentFile.value = ''
 
-        // 计算所有文件的总大小（用于基于大小的进度计算）
-        let totalSize = 0
-        const fileSizes = new Map<string, number>()
-
-        // 获取所有文件的大小
-        for (const filePath of [...mapFiles, ...queueFiles]) {
-            try {
-                const response = await fetch(filePath, { method: 'HEAD' })
-                const size = parseInt(response.headers.get('content-length') || '0', 10)
-                fileSizes.set(filePath, size)
-                totalSize += size
-            } catch (error) {
-                // 如果无法获取大小，使用默认值（避免进度计算错误）
-                fileSizes.set(filePath, 0)
-            }
+        if (totalFiles === 0) {
+            throw new Error('没有找到要上传的文件')
         }
 
-        let uploadedSize = 0 // 已上传的总大小
-
-        if (mapFiles.length > 0) {
-            uploadStatusText.value = `正在发送地图文件 (${mapFiles.length} 个)...`
-
-            for (let i = 0; i < mapFiles.length; i++) {
-                const mapFilePath = mapFiles[i]
-                const mapFileName = mapFilePath.split('/').pop() || `map${i + 1}`
-                const fileExt = mapFileName.split('.').pop()?.toLowerCase() || ''
-                uploadCurrentFile.value = mapFileName
-
-                // 确定 MIME 类型
-                let mimeType = 'application/octet-stream'
-                if (fileExt === 'pgm') {
-                    mimeType = 'image/x-portable-graymap'
-                } else if (fileExt === 'yaml' || fileExt === 'yml') {
-                    mimeType = 'text/yaml'
-                } else if (fileExt === 'pcd') {
-                    mimeType = 'application/octet-stream'
-                }
-
-                try {
-                    // 使用重试机制读取文件
-                    const fileBlob = await readLocalFile(mapFilePath, 3, 30000)
-                    const file = new File([fileBlob], mapFileName, { type: mimeType })
-                    // 如果之前无法获取大小，使用实际文件大小，并更新总大小
-                    let fileSize = fileSizes.get(mapFilePath) || 0
-                    if (fileSize < 0) {
-                        fileSize = file.size
-                        fileSizes.set(mapFilePath, fileSize)
-                        totalSize += fileSize
-                    }
-
-                    await httpClient.uploadFile(
-                        file,
-                        mapDestinationPath,  // 相对于 BASE_DIR 的路径: 'map'
-                        (progress) => {
-                            // 基于文件大小计算整体进度
-                            if (totalSize > 0) {
-                                // 当前文件已上传的大小 = 文件大小 * 进度百分比
-                                const currentFileUploaded = (fileSize * progress) / 100
-                                // 总进度 = (已上传的总大小 + 当前文件已上传大小) / 总大小
-                                const currentTotalUploaded = uploadedSize + currentFileUploaded
-                                uploadProgress.value = Math.min(99, Math.round((currentTotalUploaded / totalSize) * 100))
-                            } else {
-                                // 回退到基于文件数量的进度计算
-                                const baseProgress = (uploadCompletedFiles.value / totalFiles) * 100
-                                const currentFileProgress = (progress / 100) / totalFiles * 100
-                                uploadProgress.value = Math.min(99, baseProgress + currentFileProgress)
-                            }
-                        }
-                    )
-
-                    // 文件上传完成，更新已上传大小
-                    uploadedSize += fileSize
-                    uploadCompletedFiles.value++
-                    uploadProgress.value = totalSize > 0 ? Math.round((uploadedSize / totalSize) * 100) : Math.round((uploadCompletedFiles.value / totalFiles) * 100)
-                } catch (error) {
-                    // 忽略浏览器扩展相关的错误
-                    const errorMessage = error instanceof Error ? error.message : String(error)
-                    if (!errorMessage.includes('content_script') && !errorMessage.includes('fetchError')) {
-                        console.error(`上传地图文件失败: ${mapFileName}`, error)
-                        ElMessage.warning(`上传 ${mapFileName} 失败，将继续上传其他文件`)
-                    }
-                    // 继续上传其他文件，但计入已完成
-                    const fileSize = fileSizes.get(mapFilePath) || 0
-                    uploadedSize += fileSize
-                    uploadCompletedFiles.value++
-                    uploadProgress.value = totalSize > 0 ? Math.round((uploadedSize / totalSize) * 100) : Math.round((uploadCompletedFiles.value / totalFiles) * 100)
-                }
-            }
+        // 准备文件列表（合并地图文件和路线文件）
+        const allFilesToUpload: Array<{ localPath: string; fileName: string; destinationPath: string }> = []
+        
+        // 添加地图文件
+        for (const mapFile of mapFiles) {
+            allFilesToUpload.push({
+                localPath: mapFile,
+                fileName: mapFile.split('/').pop() || 'unknown',
+                destinationPath: mapDestinationPath
+            })
+        }
+        
+        // 添加路线文件
+        for (const queueFile of queueFiles) {
+            allFilesToUpload.push({
+                localPath: queueFile,
+                fileName: queueFile.split('/').pop() || 'unknown',
+                destinationPath: queueDestinationPath
+            })
         }
 
-        // 5. 发送 queue 目录下的所有 JSON 文件
-        if (queueFiles.length > 0) {
-            uploadStatusText.value = `正在发送路线文件 (${queueFiles.length} 个)...`
+        // 显示进度
+        uploadStatusText.value = `准备从服务器发送 ${totalFiles} 个文件到机器狗...`
+        uploadProgress.value = 1 // 初始进度
 
-            for (let i = 0; i < queueFiles.length; i++) {
-                const queueFilePath = queueFiles[i]
-                const queueFileName = queueFilePath.split('/').pop() || `route${i + 1}.json`
-                uploadCurrentFile.value = queueFileName
+        // 调用服务器端 API，直接流式转发文件（使用 Server-Sent Events 接收进度）
+        try {
+            console.log(`[sendMapToRobot] 调用服务器端转发 API，文件数量: ${allFilesToUpload.length}`)
+            
+            // 从 WebSocket URL 提取机器狗的 HTTP URL
+            const wsUrlObj = new URL(wsUrl)
+            const robotHttpUrl = `http://${wsUrlObj.hostname}:8080`
+            
+            const response = await fetch('/api/maps/send-to-robot', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    robotUrl: robotHttpUrl,
+                    files: allFilesToUpload.map(f => ({
+                        localPath: f.localPath,
+                        fileName: f.fileName,
+                        destinationPath: f.destinationPath // 每个文件自己的目标路径
+                    })),
+                    destinationPath: mapDestinationPath // 默认目标路径（向后兼容）
+                })
+            })
 
-                try {
-                    // 使用重试机制读取路线文件
-                    const queueBlob = await readLocalFile(queueFilePath, 2, 15000)
-                    const queueFile = new File([queueBlob], queueFileName, { type: 'application/json' })
-                    // 如果之前无法获取大小，使用实际文件大小，并更新总大小
-                    let fileSize = fileSizes.get(queueFilePath) || 0
-                    if (fileSize < 0) {
-                        fileSize = queueFile.size
-                        fileSizes.set(queueFilePath, fileSize)
-                        totalSize += fileSize
-                    }
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => '')
+                throw new Error(`服务器端转发失败: HTTP ${response.status} - ${errorText || response.statusText}`)
+            }
 
-                    await httpClient.uploadFile(
-                        queueFile,
-                        queueDestinationPath,  // 相对于 BASE_DIR 的路径: 'queues'
-                        (progress) => {
-                            // 基于文件大小计算整体进度
-                            if (totalSize > 0) {
-                                // 当前文件已上传的大小 = 文件大小 * 进度百分比
-                                const currentFileUploaded = (fileSize * progress) / 100
-                                // 总进度 = (已上传的总大小 + 当前文件已上传大小) / 总大小
-                                const currentTotalUploaded = uploadedSize + currentFileUploaded
-                                uploadProgress.value = Math.min(99, Math.round((currentTotalUploaded / totalSize) * 100))
-                            } else {
-                                // 回退到基于文件数量的进度计算
-                                const baseProgress = (uploadCompletedFiles.value / totalFiles) * 100
-                                const currentFileProgress = (progress / 100) / totalFiles * 100
-                                uploadProgress.value = Math.min(99, baseProgress + currentFileProgress)
+            if (!response.body) {
+                throw new Error('响应体为空')
+            }
+
+            // 使用 ReadableStream 读取 Server-Sent Events
+            const reader = response.body.getReader()
+            const decoder = new TextDecoder()
+            let buffer = ''
+            let totalSize = 0
+            let uploadedSize = 0
+            let currentFileName = ''
+
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split('\n')
+                buffer = lines.pop() || '' // 保留最后不完整的行
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6))
+                            
+                            if (data.type === 'init') {
+                                totalSize = data.totalSize || 0
+                                uploadTotalSize.value = totalSize
+                                uploadSentSize.value = 0
+                                uploadEta.value = 0
+                                uploadTotalFiles.value = data.totalFiles || 0
+                                uploadCompletedFiles.value = 0
+                                uploadProgress.value = 0
+                                console.log(`[sendMapToRobot] 总文件大小: ${formatFileSize(totalSize)}, 文件数: ${data.totalFiles}`)
+                                uploadStatusText.value = `准备从服务器发送 ${data.totalFiles} 个文件到机器狗 (${formatFileSize(totalSize)})...`
+                                ;(window as any).uploadStartTime = Date.now()
+                            } else if (data.type === 'fileStart') {
+                                currentFileName = data.fileName
+                                uploadCurrentFile.value = currentFileName
+                                uploadStatusText.value = `正在从服务器发送到机器狗: ${currentFileName} (${data.fileIndex}/${data.totalFiles})`
+                                console.log(`[sendMapToRobot] 开始发送文件: ${currentFileName} (${formatFileSize(data.fileSize || 0)})`)
+                            } else if (data.type === 'progress') {
+                                uploadSentSize.value = data.uploadedSize || uploadSentSize.value
+                                uploadTotalSize.value = data.totalSize || uploadTotalSize.value
+                                uploadProgress.value = data.progress || 0
+                                uploadStatusText.value = `正在从服务器发送到机器狗: ${formatFileSize(uploadSentSize.value)} / ${formatFileSize(uploadTotalSize.value)} (${Math.round(data.progress || 0)}%)`
+                                
+                                // 计算 ETA
+                                if (data.progress > 0 && data.progress < 100) {
+                                    const elapsed = Date.now() - ((window as any).uploadStartTime || Date.now())
+                                    if (elapsed > 0) {
+                                        const speed = data.progress / (elapsed / 1000)
+                                        const remaining = 100 - data.progress
+                                        const eta = remaining / speed
+                                        uploadEta.value = Math.max(0, eta)
+                                    }
+                                }
+                                
+                                // 每 10% 记录一次日志
+                                if (data.progress % 10 === 0 && data.progress > 0) {
+                                    console.log(`[sendMapToRobot] 上传进度: ${data.progress}% (${formatFileSize(uploadSentSize.value)} / ${formatFileSize(uploadTotalSize.value)})`)
+                                }
+                            } else if (data.type === 'fileComplete') {
+                                uploadSentSize.value = data.uploadedSize || uploadSentSize.value
+                                uploadTotalSize.value = data.totalSize || uploadTotalSize.value
+                                uploadProgress.value = data.progress || 0
+                                uploadCompletedFiles.value++
+                                uploadStatusText.value = `已完成: ${data.fileName}`
+                                console.log(`[sendMapToRobot] 文件发送完成: ${data.fileName}`)
+                            } else if (data.type === 'complete') {
+                                // 所有文件上传完成
+                                const results = data.results || []
+                                const successCount = results.filter((r: any) => r.success).length
+                                const failCount = results.length - successCount
+
+                                if (failCount > 0) {
+                                    const failedFiles = results
+                                        .filter((r: any) => !r.success)
+                                        .map((r: any) => `${r.file}${r.error ? ` (${r.error})` : ''}`)
+                                        .join(', ')
+                                    console.warn(`[sendMapToRobot] 部分文件上传失败: ${failedFiles}`)
+                                    ElMessage.warning(`部分文件上传失败: ${failedFiles}`)
+                                }
+
+                                uploadProgress.value = 100
+                                uploadSentSize.value = data.uploadedSize || uploadTotalSize.value
+                                uploadTotalSize.value = data.totalSize || uploadTotalSize.value
+                                uploadEta.value = 0
+                                uploadCompletedFiles.value = totalFiles
+                                uploadStatusText.value = `已从服务器发送 ${successCount}/${totalFiles} 个文件到机器狗 (${formatFileSize(uploadSentSize.value)})`
+                                uploadCurrentFile.value = ''
+
+                                console.log(`[sendMapToRobot] 服务器端转发完成: ${successCount} 成功, ${failCount} 失败`)
+                            } else if (data.type === 'error') {
+                                // 服务器端发生错误
+                                const errorMessage = data.error || '未知错误'
+                                console.error(`[sendMapToRobot] 服务器端错误:`, errorMessage)
+                                throw new Error(`服务器端错误: ${errorMessage}`)
                             }
+                        } catch (e) {
+                            console.error(`[sendMapToRobot] 解析进度数据失败:`, e, line)
                         }
-                    )
-
-                    // 文件上传完成，更新已上传大小
-                    uploadedSize += fileSize
-                    uploadCompletedFiles.value++
-                    uploadProgress.value = totalSize > 0 ? Math.round((uploadedSize / totalSize) * 100) : Math.round((uploadCompletedFiles.value / totalFiles) * 100)
-                } catch (error) {
-                    // 忽略浏览器扩展相关的错误
-                    const errorMessage = error instanceof Error ? error.message : String(error)
-                    if (!errorMessage.includes('content_script') && !errorMessage.includes('fetchError')) {
-                        console.error(`上传路线文件失败: ${queueFileName}`, error)
-                        ElMessage.warning(`上传 ${queueFileName} 失败，将继续上传其他文件`)
                     }
-                    // 继续上传其他文件，但计入已完成
-                    const fileSize = fileSizes.get(queueFilePath) || 0
-                    uploadedSize += fileSize
-                    uploadCompletedFiles.value++
-                    uploadProgress.value = Math.round((uploadedSize / totalSize) * 100)
                 }
             }
+
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error)
+            console.error(`[sendMapToRobot] 服务器端转发失败:`, error)
+            throw new Error(`发送文件到机器狗失败: ${errorMessage}`)
         }
 
         // 6. 等待5秒确保机器狗写入数据
         uploadProgress.value = 100
-        uploadStatusText.value = '文件发送完成，等待机器狗处理数据...'
+        uploadStatusText.value = '文件已从服务器发送到机器狗完成，等待机器狗处理数据...'
         uploadCurrentFile.value = ''
         uploadWaiting.value = true
 
@@ -1674,6 +2054,9 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
         showUploadProgress.value = false
         isUploading.value = false
         return true
+    } finally {
+        // 恢复心跳检测
+        rosConnection.resumeHeartbeat()
     }
 }
 
@@ -2318,6 +2701,23 @@ const invertMap = () => {
     ctx.putImageData(imageData, 0, 0)
 }
 
+// 处理保存对话框打开
+const handleSaveDialogOpen = () => {
+    // 重置保存模式为覆盖原图
+    saveMode.value = 'overwrite'
+    // 重置表单
+    saveMapNameForm.value.name = ''
+    saveMapNameForm.value.description = ''
+    // 如果选择了地图，初始化表单（为"保存为新文件"模式准备）
+    if (selectedMapForEdit.value) {
+        saveMapNameForm.value.name = `${selectedMapForEdit.value.displayName}_副本`
+        saveMapNameForm.value.description = selectedMapForEdit.value.config?.description || ''
+    } else {
+        saveMapNameForm.value.name = '新地图'
+        saveMapNameForm.value.description = ''
+    }
+}
+
 // 处理保存模式变化
 const handleSaveModeChange = () => {
     if (saveMode.value === 'new') {
@@ -2419,82 +2819,299 @@ const saveMap = async () => {
             const mapName = saveMapNameForm.value.name.trim()
             const description = saveMapNameForm.value.description.trim()
 
-            // 生成新文件夹名称（使用当前时间）
-            const now = new Date()
-            const year = now.getFullYear()
-            const month = String(now.getMonth() + 1).padStart(2, '0')
-            const day = String(now.getDate()).padStart(2, '0')
-            const hours = String(now.getHours()).padStart(2, '0')
-            const minutes = String(now.getMinutes()).padStart(2, '0')
-            const seconds = String(now.getSeconds()).padStart(2, '0')
-            const newFolderName = `map_${year}${month}${day}_${hours}${minutes}${seconds}`
+            // 显示进度对话框
+            showUploadMapProgress.value = true
+            uploadMapProgress.value = 0
+            uploadMapStatusText.value = '准备保存...'
+            showSaveDialog.value = false
 
-            // 获取原地图文件夹下的所有文件
-            const originalMapFiles = await getMapFiles(selectedMapForEdit.value.folderName)
-            const originalQueueFiles = await getQueueFiles(selectedMapForEdit.value.folderName)
+            try {
+                // 生成新文件夹名称（使用当前时间）
+                const now = new Date()
+                const year = now.getFullYear()
+                const month = String(now.getMonth() + 1).padStart(2, '0')
+                const day = String(now.getDate()).padStart(2, '0')
+                const hours = String(now.getHours()).padStart(2, '0')
+                const minutes = String(now.getMinutes()).padStart(2, '0')
+                const seconds = String(now.getSeconds()).padStart(2, '0')
+                const newFolderName = `map_${year}${month}${day}_${hours}${minutes}${seconds}`
 
-            // 从原mapPath中提取原pgm文件名
-            const originalPathParts = selectedMapForEdit.value.mapPath.split('/')
-            const originalPgmName = originalPathParts[originalPathParts.length - 1]
-
-            // 创建FormData，包含新pgm文件和其他需要复制的文件
-            const formData = new FormData()
-            formData.append('folderName', newFolderName)
-            formData.append('mapName', mapName)
-            formData.append('description', description)
-
-            // 添加新的pgm文件
-            const blob = new Blob([pgmData], { type: 'image/x-portable-graymap' })
-            // 使用原文件名（如果原文件名存在），否则使用默认名称
-            const newPgmName = originalPgmName || 'map.pgm'
-            formData.append('files', blob, `map/${newPgmName}`)
-
-            // 复制原地图文件夹下的其他文件（yaml、pcd等，但不包括原pgm）
-            for (const filePath of originalMapFiles) {
-                if (filePath.endsWith('.pgm')) {
-                    // 跳过原pgm文件，使用新的
-                    continue
-                }
+                // 获取原地图文件夹下的所有文件（带超时）
+                uploadMapStatusText.value = '正在获取文件列表...'
+                uploadMapProgress.value = 5
+                let originalMapFiles: string[] = []
+                let originalQueueFiles: string[] = []
+                
+                // 为获取文件列表添加超时保护（移除重复的超时，因为mapUtils.ts中已经有了）
                 try {
-                    const response = await fetch(filePath)
-                    if (response.ok) {
-                        const fileBlob = await response.blob()
-                        const fileName = filePath.split('/').pop() || ''
-                        formData.append('files', fileBlob, `map/${fileName}`)
-                    }
+                    originalMapFiles = await getMapFiles(selectedMapForEdit.value.folderName)
                 } catch (error) {
-                    console.warn(`复制文件失败: ${filePath}`, error)
+                    console.warn('获取地图文件列表失败:', error)
+                    ElMessage.warning('无法获取地图文件列表，将只保存新的PGM文件')
+                    originalMapFiles = []
                 }
-            }
-
-            // 复制queue文件夹下的所有文件
-            for (const filePath of originalQueueFiles) {
+                
                 try {
-                    const response = await fetch(filePath)
-                    if (response.ok) {
-                        const fileBlob = await response.blob()
-                        const fileName = filePath.split('/').pop() || ''
-                        formData.append('files', fileBlob, `queue/${fileName}`)
-                    }
+                    originalQueueFiles = await getQueueFiles(selectedMapForEdit.value.folderName)
                 } catch (error) {
-                    console.warn(`复制文件失败: ${filePath}`, error)
+                    console.warn('获取路线文件列表失败:', error)
+                    ElMessage.warning('无法获取路线文件列表，将只保存新的PGM文件')
+                    originalQueueFiles = []
                 }
-            }
+                
 
-            // 上传到服务器
-            const response = await fetch('/api/maps/save-new-map', {
-                method: 'POST',
-                body: formData
-            })
+                // 从原mapPath中提取原pgm文件名
+                const originalPathParts = selectedMapForEdit.value.mapPath.split('/')
+                const originalPgmName = originalPathParts[originalPathParts.length - 1]
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: '保存失败' }))
-                throw new Error(errorData.error || '保存失败')
-            }
+                // 创建FormData，包含新pgm文件和其他需要复制的文件
+                const formData = new FormData()
+                formData.append('folderName', newFolderName)
+                formData.append('mapName', mapName)
+                formData.append('description', description)
 
-            const result = await response.json()
-            ElMessage.success(`新地图已创建: ${mapName}`)
+                // 添加新的pgm文件
+                const blob = new Blob([pgmData], { type: 'image/x-portable-graymap' })
+                // 使用原文件名（如果原文件名存在），否则使用默认名称
+                const newPgmName = originalPgmName || 'map.pgm'
+                formData.append('files', blob, `map/${newPgmName}`)
+
+                // 计算总文件数（用于进度显示）
+                const totalFilesToCopy = originalMapFiles.filter(f => !f.endsWith('.pgm')).length + originalQueueFiles.length
+                
+                // 所有文件都通过服务器端复制，只传递路径信息
+                const filesToCopy: Array<{ path: string; targetPath: string }> = []
+
+                // 准备文件路径信息（所有文件都由服务器端复制）
+                uploadMapStatusText.value = '正在准备文件列表...'
+                uploadMapProgress.value = 10
+                
+                const mapFilesToCopy = originalMapFiles.filter(f => !f.endsWith('.pgm'))
+                const queueFilesToCopy = originalQueueFiles
+                
+                // 如果没有任何文件需要复制，直接跳到上传阶段
+                if (totalFilesToCopy === 0) {
+                    uploadMapProgress.value = 50
+                    uploadMapStatusText.value = '准备从本地文件上传到服务器...'
+                } else {
+                    // 所有文件都通过服务器端复制，只收集路径信息
+                    uploadMapStatusText.value = '正在准备文件列表...'
+                    uploadMapProgress.value = 20
+                    
+                    // 收集地图文件路径
+                    for (let i = 0; i < mapFilesToCopy.length; i++) {
+                        const filePath = mapFilesToCopy[i]
+                        const fileName = filePath.split('/').pop() || ''
+                        // 提取相对路径（从/maps/开始的部分）
+                        const relativePath = filePath.replace(/^\/maps\//, '')
+                        const targetPath = `map/${fileName}`
+                        filesToCopy.push({ path: relativePath, targetPath })
+                        
+                        // 更新进度（20% - 35%）
+                        const mapProgress = 20 + Math.round(((i + 1) / mapFilesToCopy.length) * 15)
+                        uploadMapProgress.value = Math.min(35, mapProgress)
+                    }
+                    
+                    // 收集queue文件路径
+                    uploadMapStatusText.value = '正在准备路线文件列表...'
+                    if (queueFilesToCopy.length > 0) {
+                        uploadMapProgress.value = 35
+                    }
+                    for (let i = 0; i < queueFilesToCopy.length; i++) {
+                        const filePath = queueFilesToCopy[i]
+                        const fileName = filePath.split('/').pop() || ''
+                        // 提取相对路径（从/maps/开始的部分）
+                        const relativePath = filePath.replace(/^\/maps\//, '')
+                        const targetPath = `queue/${fileName}`
+                        filesToCopy.push({ path: relativePath, targetPath })
+                        
+                        // 更新进度（35% - 50%）
+                        if (queueFilesToCopy.length > 0) {
+                            const queueProgress = 35 + Math.round(((i + 1) / queueFilesToCopy.length) * 15)
+                            uploadMapProgress.value = Math.min(50, queueProgress)
+                        }
+                    }
+                    
+                    // 确保准备阶段结束后进度到50%
+                    uploadMapProgress.value = 50
+                    uploadMapStatusText.value = '准备从本地文件上传到服务器...'
+                }
+
+                // 上传到服务器（使用 XMLHttpRequest 以支持进度和超时）
+                
+                // 内存优化：估算FormData总大小
+                let totalFormDataSize = pgmData.length // PGM文件大小
+                // 注意：FormData.entries()在某些浏览器中可能不可用，使用try-catch
+                try {
+                    for (const [, value] of formData.entries()) {
+                        if (value && typeof value === 'object' && 'size' in value) {
+                            // 检查是否是Blob或File类型
+                            const blobLike = value as Blob | File
+                            if (blobLike.size !== undefined) {
+                                totalFormDataSize += blobLike.size
+                            }
+                        } else if (typeof value === 'string') {
+                            totalFormDataSize += new TextEncoder().encode(value).length
+                        }
+                    }
+                } catch (e) {
+                    // 某些浏览器可能不支持FormData.entries()，忽略
+                    console.warn('无法计算FormData大小:', e)
+                }
+                const totalSizeMB = totalFormDataSize / 1024 / 1024
+                
+                uploadMapStatusText.value = totalSizeMB > 100 
+                    ? `正在从本地文件上传大文件包到服务器... (${totalSizeMB.toFixed(1)} MB)`
+                    : '正在从本地文件上传到服务器...'
+                uploadMapProgress.value = 50
+                await new Promise<void>((resolve, reject) => {
+                    const xhr = new XMLHttpRequest()
+                    
+                    // 设置超时（30分钟，防止网络缓慢时误判为失败）
+                    const timeout = setTimeout(() => {
+                        xhr.abort()
+                        reject(new Error('上传超时（30分钟），请检查网络连接后重试'))
+                    }, 30 * 60 * 1000)
+
+                    // 监听上传进度
+                    xhr.upload.addEventListener('progress', (e) => {
+                        if (e.lengthComputable) {
+                            // 上传进度占 50% - 95%
+                            const uploadProgress = (e.loaded / e.total) * 100
+                            uploadMapProgress.value = 50 + Math.round((uploadProgress / 100) * 45)
+                            uploadMapStatusText.value = `正在从本地文件上传到服务器... ${Math.round(uploadProgress)}%`
+                            // 如果上传完成，立即更新状态
+                            if (e.loaded >= e.total) {
+                                uploadMapProgress.value = 95
+                                uploadMapStatusText.value = '本地文件上传到服务器完成，等待服务器响应...'
+                            }
+                        }
+                    })
+
+                    xhr.addEventListener('load', () => {
+                        clearTimeout(timeout)
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            try {
+                                const result = JSON.parse(xhr.responseText)
+                                if (result.success) {
+                                    uploadMapProgress.value = 100
+                                    uploadMapStatusText.value = '本地文件上传到服务器完成，等待服务器处理文件...'
+                                    
+                                    // 计算上传的文件总大小，用于确定等待时间
+                                    let totalFileSize = pgmData.length // PGM文件大小
+                                    try {
+                                        for (const [, value] of formData.entries()) {
+                                            if (value && typeof value === 'object' && 'size' in value) {
+                                                const blobLike = value as Blob | File
+                                                if (blobLike.size !== undefined) {
+                                                    totalFileSize += blobLike.size
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // 忽略错误
+                                    }
+                                    
+                                    const totalSizeMB = totalFileSize / 1024 / 1024
+                                    // 对于大文件，需要等待服务器处理完成
+                                    // 根据文件大小动态调整等待时间：>100MB: 10秒, >50MB: 5秒, 其他: 2秒
+                                    const waitTime = totalSizeMB > 100 ? 10000 : totalSizeMB > 50 ? 5000 : 2000
+                                    
+                                    // 等待服务器处理大文件
+                                    setTimeout(async () => {
+                                        try {
+                                            uploadMapStatusText.value = '正在刷新地图列表...'
+                                            // 刷新地图列表，添加重试机制
+                                            let retries = 3
+                                            let success = false
+                                            
+                                            while (retries > 0 && !success) {
+                                                try {
+                                                    await fetchAvailableMaps()
+                                                    success = true
+                                                } catch (error) {
+                                                    retries--
+                                                    if (retries > 0) {
+                                                        console.warn(`刷新地图列表失败，${retries}次重试剩余...`, error)
+                                                        uploadMapStatusText.value = `刷新地图列表失败，正在重试... (剩余${retries}次)`
+                                                        await new Promise(resolve => setTimeout(resolve, 2000))
+                                                    } else {
+                                                        console.error('刷新地图列表失败，已用完重试次数', error)
+                                                        // 即使刷新失败，也认为保存成功
+                                                        ElMessage.warning('地图保存成功，但刷新地图列表失败，请手动刷新')
+                                                    }
+                                                }
+                                            }
+                                            
+                                            uploadMapStatusText.value = '保存完成'
+                                            resolve()
+                                        } catch (error) {
+                                            // 即使刷新失败，也认为保存成功
+                                            ElMessage.warning('地图保存成功，但刷新地图列表失败，请手动刷新')
+                                            resolve() // 不拒绝，因为保存本身是成功的
+                                        }
+                                    }, waitTime)
+                                } else {
+                                    reject(new Error(result.error || '保存失败'))
+                                }
+                            } catch (error) {
+                                // 即使解析失败，也认为成功（可能是空响应）
+                                uploadMapProgress.value = 100
+                                uploadMapStatusText.value = '保存完成'
+                                resolve()
+                            }
+                        } else {
+                            let errorMsg = `HTTP ${xhr.status}: ${xhr.statusText}`
+                            // 为常见的服务器错误提供更友好的提示
+                            if (xhr.status === 502) {
+                                errorMsg = '服务器网关错误 (502)，可能是后端服务未启动或无法连接。请检查服务器状态。'
+                            } else if (xhr.status === 503) {
+                                errorMsg = '服务暂时不可用 (503)，请稍后重试。'
+                            } else if (xhr.status === 504) {
+                                errorMsg = '网关超时 (504)，服务器响应时间过长。请检查网络连接。'
+                            } else if (xhr.status >= 500) {
+                                errorMsg = `服务器错误 (${xhr.status})，请稍后重试或联系管理员。`
+                            }
+                            try {
+                                const errorResult = JSON.parse(xhr.responseText)
+                                if (errorResult.error) {
+                                    errorMsg = errorResult.error
+                                }
+                            } catch (e) {
+                                // 忽略解析错误，使用上面的默认错误消息
+                            }
+                            reject(new Error(errorMsg))
+                        }
+                    })
+
+                    xhr.addEventListener('error', () => {
+                        clearTimeout(timeout)
+                        reject(new Error('网络错误，请检查网络连接'))
+                    })
+
+                    xhr.addEventListener('abort', () => {
+                        clearTimeout(timeout)
+                        reject(new Error('上传已取消'))
+                    })
+
+                    // 将所有文件路径信息添加到FormData，由服务器端复制
+                    if (filesToCopy.length > 0) {
+                        formData.append('filesToCopy', JSON.stringify(filesToCopy))
+                        uploadMapStatusText.value = `包含 ${filesToCopy.length} 个文件，将由服务器端复制`
+                    }
+                    
+                    xhr.open('POST', '/api/maps/save-new-map')
+                    xhr.send(formData)
+                })
+
+                ElMessage.success(`新地图已创建: ${mapName}`)
                 await fetchAvailableMaps()
+                showUploadMapProgress.value = false
+            } catch (error) {
+                // 错误已在 Promise 中处理，这里只需要关闭对话框
+                showUploadMapProgress.value = false
+                throw error // 重新抛出错误，让外层 catch 处理
+            }
         }
 
         showSaveDialog.value = false

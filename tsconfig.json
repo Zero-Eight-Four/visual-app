@@ -27,5 +27,15 @@
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "maps",
+    "videos",
+    "temp",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

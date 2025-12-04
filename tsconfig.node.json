@@ -6,5 +6,13 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "maps",
+    "videos",
+    "temp"
+  ]
 }

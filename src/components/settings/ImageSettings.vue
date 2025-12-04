@@ -155,48 +155,88 @@
         </el-dialog>
 
         <!-- 视频管理对话框 -->
-        <el-dialog v-model="showVideoManagerDialog" title="视频管理" width="900px" @open="loadVideoList">
-            <el-table :data="videoList" :style="{ width: '100%' }" max-height="500" row-key="folder" :default-expand-all="false" :expand-row-keys="defaultExpandKeys">
-                <el-table-column type="expand">
-                    <template #default="{ row }">
-                        <el-table :data="row.videos" :style="{ width: '100%' }" size="small">
-                            <el-table-column prop="name" label="文件名" width="250" show-overflow-tooltip />
-                            <el-table-column prop="size" label="大小" width="100" align="right" />
-                            <el-table-column prop="modified" label="修改时间" width="180" />
-                            <el-table-column label="操作" width="280" fixed="right">
-                                <template #default="{ row: video }">
-                                    <div class="video-actions">
-                                        <el-button size="small" @click="handleRenameVideo(video)">
-                                            <el-icon style="margin-right: 4px;">
-                                                <Edit />
-                                            </el-icon>
-                                            重命名
-                                        </el-button>
-                                        <el-button size="small" type="primary" @click="handleDownloadVideo(video)">
-                                            <el-icon style="margin-right: 4px;">
-                                                <Download />
-                                            </el-icon>
-                                            下载
-                                        </el-button>
-                                        <el-button size="small" type="danger" @click="handleDeleteVideo(video)">
-                                            <el-icon style="margin-right: 4px;">
-                                                <Delete />
-                                            </el-icon>
-                                            删除
-                                        </el-button>
-                                    </div>
-                                </template>
-                            </el-table-column>
-                        </el-table>
-                    </template>
-                </el-table-column>
-                <el-table-column prop="date" label="日期" width="150" />
-                <el-table-column prop="count" label="视频数量" width="120" align="center">
-                    <template #default="{ row }">
-                        <span>{{ row.count }} 个视频</span>
-                    </template>
-                </el-table-column>
-            </el-table>
+        <el-dialog v-model="showVideoManagerDialog" title="视频管理" width="1200px" :close-on-click-modal="false" @open="loadVideoList">
+            <div class="video-manager-container">
+                <el-table 
+                    :data="videoList" 
+                    style="width: 100%" 
+                    max-height="600" 
+                    row-key="folder" 
+                    :default-expand-all="false" 
+                    :expand-row-keys="defaultExpandKeys"
+                    stripe
+                    border>
+                    <el-table-column type="expand" width="50">
+                        <template #default="{ row }">
+                            <div class="video-list-container">
+                                <el-table 
+                                    :data="row.videos" 
+                                    style="width: 100%" 
+                                    size="small"
+                                    stripe
+                                    border>
+                                    <el-table-column prop="name" label="文件名" min-width="300" show-overflow-tooltip>
+                                        <template #default="{ row: video }">
+                                            <span class="video-name">{{ video.name }}</span>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column prop="size" label="大小" width="120" align="right">
+                                        <template #default="{ row: video }">
+                                            <span class="video-size">{{ video.size }}</span>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column prop="modified" label="修改时间" width="200" align="center">
+                                        <template #default="{ row: video }">
+                                            <span class="video-time">{{ video.modified }}</span>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column label="操作" width="320" fixed="right" align="center">
+                                        <template #default="{ row: video }">
+                                            <div class="video-actions">
+                                                <el-button size="small" @click="handleRenameVideo(video)" style="margin-right: 8px;">
+                                                    <el-icon style="margin-right: 4px;">
+                                                        <Edit />
+                                                    </el-icon>
+                                                    重命名
+                                                </el-button>
+                                                <el-button size="small" type="primary" @click="handleDownloadVideo(video)" style="margin-right: 8px;">
+                                                    <el-icon style="margin-right: 4px;">
+                                                        <Download />
+                                                    </el-icon>
+                                                    下载
+                                                </el-button>
+                                                <el-button size="small" type="danger" @click="handleDeleteVideo(video)">
+                                                    <el-icon style="margin-right: 4px;">
+                                                        <Delete />
+                                                    </el-icon>
+                                                    删除
+                                                </el-button>
+                                            </div>
+                                        </template>
+                                    </el-table-column>
+                                </el-table>
+                            </div>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="date" label="日期" min-width="200" align="center">
+                        <template #default="{ row }">
+                            <span class="folder-date">{{ row.date }}</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="count" label="视频数量" min-width="150" align="center">
+                        <template #default="{ row }">
+                            <el-tag type="info" size="small">{{ row.count }} 个视频</el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="120" align="center" fixed="right">
+                        <template #default="{ row }">
+                            <el-button size="small" type="primary" link @click="toggleExpand(row.folder)">
+                                {{ defaultExpandKeys.includes(row.folder) ? '收起' : '展开' }}
+                            </el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
+            </div>
         </el-dialog>
 
         <!-- 重命名对话框 -->
@@ -569,6 +609,16 @@ const loadVideoList = async () => {
     }
 }
 
+// 切换展开/收起
+const toggleExpand = (folder: string) => {
+    const index = defaultExpandKeys.value.indexOf(folder)
+    if (index > -1) {
+        defaultExpandKeys.value.splice(index, 1)
+    } else {
+        defaultExpandKeys.value.push(folder)
+    }
+}
+
 // 重命名视频
 const handleRenameVideo = (video: { name: string; folder: string }) => {
     renameCurrentVideo.value = video
@@ -820,16 +870,96 @@ onUnmounted(() => {
     }
 }
 
+/* 视频管理对话框样式 */
+.video-manager-container {
+    padding: 10px 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* 确保对话框内容占满宽度 */
+:deep(.el-dialog__body) {
+    padding: 20px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.video-list-container {
+    padding: 10px;
+    background-color: #fafafa;
+}
+
+.video-name {
+    font-weight: 500;
+    color: #303133;
+}
+
+.video-size {
+    color: #606266;
+    font-family: 'Courier New', monospace;
+}
+
+.video-time {
+    color: #909399;
+    font-size: 12px;
+}
+
+.folder-date {
+    font-weight: 500;
+    color: #303133;
+}
+
 /* 视频操作按钮样式 */
 .video-actions {
     display: flex;
     gap: 8px;
     align-items: center;
-    flex-wrap: wrap;
+    justify-content: center;
+    flex-wrap: nowrap;
 }
 
 .video-actions .el-button {
     flex: 0 0 auto;
     white-space: nowrap;
+    min-width: auto;
+}
+
+/* 优化表格样式 */
+:deep(.el-table) {
+    font-size: 14px;
+    width: 100% !important;
+}
+
+:deep(.el-table__header-wrapper),
+:deep(.el-table__body-wrapper) {
+    width: 100% !important;
+}
+
+:deep(.el-table th) {
+    background-color: #f5f7fa;
+    font-weight: 600;
+    color: #303133;
+}
+
+:deep(.el-table td) {
+    padding: 12px 0;
+}
+
+:deep(.el-table--border) {
+    border: 1px solid #ebeef5;
+}
+
+:deep(.el-table--border th),
+:deep(.el-table--border td) {
+    border-right: 1px solid #ebeef5;
+}
+
+:deep(.el-table--stripe .el-table__body tr.el-table__row--striped td) {
+    background-color: #fafafa;
+}
+
+/* 确保表格占满容器宽度 */
+:deep(.el-table__inner-wrapper) {
+    width: 100% !important;
 }
 </style>

@@ -216,8 +216,26 @@ const autoSubscribeDefaultCamera = async () => {
     }
 
     try {
-        // 获取所有可用话题
-        const topics = await rosConnection.getTopics()
+        // 获取所有可用话题（添加超时和错误处理）
+        let topics: any[] = []
+        try {
+            topics = await Promise.race([
+                rosConnection.getTopics(),
+                new Promise<any[]>((_, reject) => 
+                    setTimeout(() => reject(new Error('获取话题列表超时')), 5000)
+                )
+            ])
+        } catch (error) {
+            // 如果获取话题失败，尝试使用 store 中已保存的话题
+            console.warn('[摄像头自动订阅] 获取话题列表失败，使用已保存的话题列表:', error)
+            topics = rosStore.topics || []
+            
+            // 如果 store 中也没有话题，直接返回
+            if (topics.length === 0) {
+                console.warn('[摄像头自动订阅] 没有可用的话题列表')
+                return
+            }
+        }
 
         // 查找第一个可用的默认摄像头话题
         let selectedDefault = ''
