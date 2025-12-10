@@ -13,7 +13,7 @@ export async function fetchAllMaps(): Promise<MapInfo[]> {
   try {
     // 首先获取 maps 目录下的所有文件夹
     const response = await fetch('/api/maps/list')
-    
+
     if (!response.ok) {
       // 如果 API 不存在，尝试直接访问 maps 目录
       return await fetchMapsFromDirectory()
@@ -80,7 +80,7 @@ async function fetchMapInfo(folderName: string): Promise<MapInfo | null> {
   try {
     // 读取配置文件
     const config = await fetchMapConfig(folderName)
-    
+
     // 查找 map 目录下的 pgm 文件
     const mapPath = await findPgmFile(folderName)
     if (!mapPath) {
@@ -122,7 +122,7 @@ async function fetchMapInfo(folderName: string): Promise<MapInfo | null> {
       pcdPath,
       yamlPath,
       queueCount,
-      config,
+      config: config || undefined,
       createTime
     }
   } catch (error) {
@@ -139,7 +139,7 @@ async function fetchMapConfig(folderName: string): Promise<MapConfig | null> {
     // 尝试读取 config.json
     const configUrl = `/maps/${encodeURIComponent(folderName)}/config.json`
     const response = await fetch(configUrl)
-    
+
     if (response.ok) {
       try {
         const text = await response.text()
@@ -157,7 +157,7 @@ async function fetchMapConfig(folderName: string): Promise<MapConfig | null> {
     // 如果 config.json 不存在，尝试读取 map.json
     const mapConfigUrl = `/maps/${encodeURIComponent(folderName)}/map.json`
     const mapConfigResponse = await fetch(mapConfigUrl)
-    
+
     if (mapConfigResponse.ok) {
       try {
         const text = await mapConfigResponse.text()
@@ -184,11 +184,28 @@ async function fetchMapConfig(folderName: string): Promise<MapConfig | null> {
  * 查找 map 目录下的 PGM 文件
  */
 async function findPgmFile(folderName: string): Promise<string | null> {
+  // 1. 尝试通过 API 获取 (JSON)
   try {
-    // 尝试访问 map 目录
+    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
+    const response = await fetch(apiUrl)
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success && data.files) {
+        const pgmFile = data.files.find((f: any) => f.name.endsWith('.pgm'))
+        if (pgmFile) {
+          return pgmFile.url // API 返回完整的 URL 路径
+        }
+      }
+    }
+  } catch (e) {
+    // API 调用失败，继续尝试静态抓取
+  }
+
+  // 2. 回退到静态目录抓取 (HTML)
+  try {
     const mapDirUrl = `/maps/${encodeURIComponent(folderName)}/map/`
     const response = await fetch(mapDirUrl)
-    
+
     if (!response.ok) {
       // 如果 map 目录不存在，尝试直接在文件夹根目录查找
       return await findPgmInRoot(folderName)
@@ -220,7 +237,7 @@ async function findPgmInRoot(folderName: string): Promise<string | null> {
   try {
     const folderUrl = `/maps/${encodeURIComponent(folderName)}/`
     const response = await fetch(folderUrl)
-    
+
     if (!response.ok) {
       return null
     }
@@ -247,10 +264,28 @@ async function findPgmInRoot(folderName: string): Promise<string | null> {
  * 查找 map 目录下的 PCD 文件（可选）
  */
 async function findPcdFile(folderName: string): Promise<string | undefined> {
+  // 1. 尝试通过 API 获取 (JSON)
+  try {
+    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
+    const response = await fetch(apiUrl)
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success && data.files) {
+        const pcdFile = data.files.find((f: any) => f.name.endsWith('.pcd'))
+        if (pcdFile) {
+          return pcdFile.url
+        }
+      }
+    }
+  } catch (e) {
+    // API 调用失败，继续尝试静态抓取
+  }
+
+  // 2. 回退到静态目录抓取 (HTML)
   try {
     const mapDirUrl = `/maps/${encodeURIComponent(folderName)}/map/`
     const response = await fetch(mapDirUrl)
-    
+
     if (!response.ok) {
       return undefined
     }
@@ -277,10 +312,28 @@ async function findPcdFile(folderName: string): Promise<string | undefined> {
  * 查找 map 目录下的 YAML 文件（可选）
  */
 async function findYamlFile(folderName: string): Promise<string | undefined> {
+  // 1. 尝试通过 API 获取 (JSON)
+  try {
+    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
+    const response = await fetch(apiUrl)
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success && data.files) {
+        const yamlFile = data.files.find((f: any) => f.name.endsWith('.yaml') || f.name.endsWith('.yml'))
+        if (yamlFile) {
+          return yamlFile.url
+        }
+      }
+    }
+  } catch (e) {
+    // API 调用失败，继续尝试静态抓取
+  }
+
+  // 2. 回退到静态目录抓取 (HTML)
   try {
     const mapDirUrl = `/maps/${encodeURIComponent(folderName)}/map/`
     const response = await fetch(mapDirUrl)
-    
+
     if (!response.ok) {
       return undefined
     }
@@ -308,27 +361,8 @@ async function findYamlFile(folderName: string): Promise<string | undefined> {
  */
 async function countQueueFiles(folderName: string): Promise<number> {
   try {
-    const queueDirUrl = `/maps/${encodeURIComponent(folderName)}/queue/`
-    const response = await fetch(queueDirUrl)
-    
-    if (!response.ok) {
-      return 0
-    }
-
-    const text = await response.text()
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(text, 'text/html')
-    const links = doc.querySelectorAll('a')
-    
-    let count = 0
-    links.forEach(link => {
-      const href = link.getAttribute('href')
-      if (href && href.endsWith('.json')) {
-        count++
-      }
-    })
-
-    return count
+    const files = await getQueueFiles(folderName)
+    return files.length
   } catch (error) {
     console.warn(`统计路线文件失败 (${folderName}):`, error)
     return 0
@@ -339,6 +373,27 @@ async function countQueueFiles(folderName: string): Promise<number> {
  * 获取 queue 目录下的所有 JSON 文件路径
  */
 export async function getQueueFiles(folderName: string): Promise<string[]> {
+  // 1. 尝试通过 API 获取 (JSON)
+  try {
+    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=queue`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    const response = await fetch(apiUrl, { signal: controller.signal })
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success && data.files) {
+        return data.files
+          .filter((f: any) => f.name.endsWith('.json'))
+          .map((f: any) => f.url)
+      }
+    }
+  } catch (e) {
+    // API 调用失败，继续尝试静态抓取
+  }
+
+  // 2. 回退到静态目录抓取 (HTML)
   try {
     const queueDirUrl = `/maps/${encodeURIComponent(folderName)}/queue/`
     // 添加超时处理
@@ -348,7 +403,7 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
       signal: controller.signal
     })
     clearTimeout(timeoutId)
-    
+
     if (!response.ok) {
       return []
     }
@@ -357,7 +412,7 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
     const parser = new DOMParser()
     const doc = parser.parseFromString(text, 'text/html')
     const links = doc.querySelectorAll('a')
-    
+
     const files: string[] = []
     links.forEach(link => {
       const href = link.getAttribute('href')
@@ -378,6 +433,30 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
  * 获取 map 目录下的所有地图文件路径（pcd、pgm、yaml）
  */
 export async function getMapFiles(folderName: string): Promise<string[]> {
+  // 1. 尝试通过 API 获取 (JSON)
+  try {
+    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    const response = await fetch(apiUrl, { signal: controller.signal })
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success && data.files) {
+        return data.files
+          .filter((f: any) => {
+            const name = f.name.toLowerCase()
+            return name.endsWith('.pgm') || name.endsWith('.pcd') || name.endsWith('.yaml') || name.endsWith('.yml')
+          })
+          .map((f: any) => f.url)
+      }
+    }
+  } catch (e) {
+    // API 调用失败，继续尝试静态抓取
+  }
+
+  // 2. 回退到静态目录抓取 (HTML)
   try {
     const mapDirUrl = `/maps/${encodeURIComponent(folderName)}/map/`
     // 添加超时处理
@@ -387,7 +466,7 @@ export async function getMapFiles(folderName: string): Promise<string[]> {
       signal: controller.signal
     })
     clearTimeout(timeoutId)
-    
+
     if (!response.ok) {
       return []
     }
@@ -396,15 +475,15 @@ export async function getMapFiles(folderName: string): Promise<string[]> {
     const parser = new DOMParser()
     const doc = parser.parseFromString(text, 'text/html')
     const links = doc.querySelectorAll('a')
-    
+
     const files: string[] = []
     links.forEach(link => {
       const href = link.getAttribute('href')
       if (href) {
         const fileName = href.replace(/^.*\//, '')
         // 只包含地图相关文件
-        if (fileName.endsWith('.pgm') || fileName.endsWith('.pcd') || 
-            fileName.endsWith('.yaml') || fileName.endsWith('.yml')) {
+        if (fileName.endsWith('.pgm') || fileName.endsWith('.pcd') ||
+          fileName.endsWith('.yaml') || fileName.endsWith('.yml')) {
           files.push(`/maps/${encodeURIComponent(folderName)}/map/${fileName}`)
         }
       }

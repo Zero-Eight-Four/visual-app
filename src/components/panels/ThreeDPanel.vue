@@ -739,7 +739,7 @@ const createArrowMarker = (marker: any, pos: any, orient: any): THREE.Object3D =
 }
 
 // 创建文本marker
-const createTextMarker = (marker: any, pos: any, orient: any): THREE.Object3D | null => {
+const createTextMarker = (marker: any, pos: any, _orient: any): THREE.Object3D | null => {
     // 支持文本字段为字符串或数字
     const textValue = marker.text !== undefined && marker.text !== null ? String(marker.text) : null
 

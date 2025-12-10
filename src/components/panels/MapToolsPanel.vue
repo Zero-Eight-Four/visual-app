@@ -516,8 +516,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from 'vue'
-import { ElButton, ElButtonGroup, ElDialog, ElSelect, ElOption, ElIcon, ElMessage, ElMessageBox, ElInputNumber, ElRadioGroup, ElRadio, ElInput, ElAlert, ElProgress, ElDivider, ElForm, ElFormItem, ElText } from 'element-plus'
-import { Location, FolderOpened, Edit, Document, Check, Upload, Delete, ZoomIn, ZoomOut, Refresh, Download, Warning, InfoFilled } from '@element-plus/icons-vue'
+import { ElButton, ElButtonGroup, ElDialog, ElIcon, ElMessage, ElMessageBox, ElInputNumber, ElRadioGroup, ElRadio, ElInput, ElAlert, ElProgress, ElDivider, ElForm, ElFormItem } from 'element-plus'
+import { Location, FolderOpened, Edit, Document, Check, Upload, Delete, ZoomIn, ZoomOut, Refresh, Warning, InfoFilled } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
 import { createHttpFileTransferClient } from '@/utils/httpFileTransferUtils'
 import { fetchAllMaps, getQueueFiles, getMapFiles } from '@/utils/mapUtils'
@@ -547,8 +547,8 @@ const showUploadMapProgress = ref(false)
 const uploadMapProgress = ref(0)
 const uploadMapStatusText = ref('准备上传...')
 const uploadMapCurrentFile = ref('')
-const uploadMapTotalFiles = ref(0)
-const uploadMapCompletedFiles = ref(0)
+// const uploadMapTotalFiles = ref(0)
+// const uploadMapCompletedFiles = ref(0)
 const uploadMapTotalSize = ref(0) // 总文件大小（字节）
 const uploadMapDownloadedSize = ref(0) // 已下载大小（字节）
 const uploadMapEta = ref(0) // 预计剩余时间（秒）
@@ -580,9 +580,7 @@ const formatTime = (seconds: number): string => {
 const availableMaps = ref<MapInfo[]>([])
 const currentMap = ref<MapInfo | null>(null)
 const selectedMapForEdit = ref<MapInfo | null>(null)
-const selectedMapFile = ref<string>('')
 const mapCanvasRef = ref<HTMLCanvasElement>()
-const fileInputRef = ref<HTMLInputElement>()
 const editing = ref(false)
 const saving = ref(false)
 const mapLoaded = ref(false)
@@ -590,7 +588,7 @@ const currentTool = ref<'brush' | 'rectangle' | 'eraser'>('brush')
 const brushSize = ref(5)
 const zoomLevel = ref(1.0)
 const saveMode = ref<'overwrite' | 'new'>('overwrite')
-const saveFileName = ref<string>('')
+// const saveFileName = ref<string>('')
 const saveMapNameForm = ref({ name: '', description: '' })
 
 // 上传进度相关
@@ -989,7 +987,7 @@ const validateFolderStructure = (files: File[]) => {
     // 检查 map 目录下是否有 pgm 文件
     const hasPgmFile = filePaths.some(p => p.includes('/map/') && p.endsWith('.pgm'))
     // 检查是否有配置文件
-    const hasConfig = filePaths.some(p => p.endsWith('config.json') || p.endsWith('map.json'))
+    // const hasConfig = filePaths.some(p => p.endsWith('config.json') || p.endsWith('map.json'))
 
     const errors: string[] = []
     if (!hasMapDir) {
@@ -1090,7 +1088,8 @@ const confirmUploadMap = async () => {
                         files: downloadedRobotFiles.value.map(f => ({
                             path: f.path,
                             name: f.name,
-                            localPath: f.localPath
+                            localPath: f.localPath,
+                            size: (f as any).size || 0
                         })),
                         folderName,
                         mapName,
@@ -1288,7 +1287,7 @@ const confirmUploadMap = async () => {
 
                     // 计算 ETA
                     const now = Date.now()
-                    const timeElapsed = (now - (window as any).uploadStartTime) / 1000 // 秒
+                    // const timeElapsed = (now - (window as any).uploadStartTime) / 1000 // 秒
                     const sizeUploaded = uploadedSize - lastUploadedSize
                     const timeSinceLastUpdate = (now - lastUpdateTime) / 1000
 
@@ -1437,17 +1436,20 @@ const confirmUploadMap = async () => {
             })
 
             // 添加文件到 FormData
-            // 注意：第三个参数应该是文件名，但我们需要保留路径信息
-            // 所以使用路径作为文件名，后端会解析路径
+            // 使用 item.path (相对路径) 作为文件名，以便后端可以保持目录结构
             filesToUpload.forEach((item) => {
-                // 确保路径使用正斜杠（跨平台兼容）
-                const normalizedPath = item.path.replace(/\\/g, '/')
-                formData.append('files', item.file, normalizedPath)
+                // 简单的文件过滤：只上传通常在 map 目录下的文件
+                const ext = item.name.split('.').pop()?.toLowerCase()
+                if (['pgm', 'yaml', 'yml', 'pcd', 'json'].includes(ext || '')) {
+                    // 优先使用相对路径，如果没有则使用文件名
+                    const fileName = item.path || item.name
+                    formData.append('files', item.file, fileName)
+                }
             })
 
 
             uploadMapStatusText.value = '开始上传...'
-            xhr.open('POST', '/api/maps/upload-folder')
+            xhr.open('POST', '/api/maps/save')
             xhr.send(formData)
         })
     } catch (error) {
@@ -1537,18 +1539,18 @@ const handleDownloadFromRobot = async () => {
 
         // 准备文件列表信息（不下载到浏览器，只保存文件信息）
         // 实际下载将在用户确认后通过服务器端 API 直接进行
-        const allFiles: Array<{ name: string; path: string; localPath: string }> = []
+        const allFiles: Array<{ name: string; path: string; localPath: string; size: number }> = []
         
         // 准备 map 目录的文件信息
         for (const file of mapFiles) {
             const localPath = `map/${file.name}`
-            allFiles.push({ name: file.name, path: file.path, localPath })
+            allFiles.push({ name: file.name, path: file.path, localPath, size: file.size })
         }
 
         // 准备 queues 目录的文件信息
         for (const file of queueFiles) {
             const localPath = `queue/${file.name}`
-            allFiles.push({ name: file.name, path: file.path, localPath })
+            allFiles.push({ name: file.name, path: file.path, localPath, size: file.size })
         }
 
         if (allFiles.length === 0) {
@@ -1917,7 +1919,7 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             const decoder = new TextDecoder()
             let buffer = ''
             let totalSize = 0
-            let uploadedSize = 0
+            // let uploadedSize = 0
             let currentFileName = ''
 
             // eslint-disable-next-line no-constant-condition
@@ -2254,7 +2256,7 @@ const loadMapForEdit = async (mapPath: string) => {
             throw new Error(`无法加载地图文件: HTTP ${response.status} ${response.statusText}`)
         }
 
-        const contentType = response.headers.get('content-type')
+        // const contentType = response.headers.get('content-type')
 
         const arrayBuffer = await response.arrayBuffer()
 
@@ -2330,50 +2332,49 @@ const loadMapForEdit = async (mapPath: string) => {
 }
 
 // 触发文件输入
-const triggerFileInput = () => {
-    fileInputRef.value?.click()
-}
+// const triggerFileInput = () => {
+//     fileInputRef.value?.click()
+// }
 
 // 处理文件选择
-const handleFileSelect = async (event: Event) => {
-    const target = event.target as HTMLInputElement
-    const file = target.files?.[0]
-    if (!file) return
+// const handleFileSelect = async (event: Event) => {
+//     const target = event.target as HTMLInputElement
+//     const file = target.files?.[0]
+//     if (!file) return
 
-    if (!file.name.endsWith('.pgm')) {
-        ElMessage.warning('请选择 .pgm 格式的地图文件')
-        return
-    }
+//     if (!file.name.endsWith('.pgm')) {
+//         ElMessage.warning('请选择 .pgm 格式的地图文件')
+//         return
+//     }
 
-    try {
-        editing.value = true
-        mapLoaded.value = false
-        selectedMapFile.value = file.name
+//     try {
+//         editing.value = true
+//         selectedMapFile.value = file.name
 
-        const arrayBuffer = await file.arrayBuffer()
-        const imageData = await parsePGM(arrayBuffer)
+//         const arrayBuffer = await file.arrayBuffer()
+//         const imageData = await parsePGM(arrayBuffer)
 
-        if (!imageData || !mapCanvasRef.value) {
-            throw new Error('解析地图文件失败')
-        }
+//         if (!imageData || !mapCanvasRef.value) {
+//             throw new Error('解析地图文件失败')
+//         }
 
-        const canvas = mapCanvasRef.value
-        canvas.width = imageData.width
-        canvas.height = imageData.height
+//         const canvas = mapCanvasRef.value
+//         canvas.width = imageData.width
+//         canvas.height = imageData.height
 
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        if (ctx) {
-            ctx.putImageData(imageData, 0, 0)
-            mapLoaded.value = true
-            ElMessage.success('地图加载成功')
-        }
-    } catch (error) {
-        console.error('加载文件失败:', error)
-        ElMessage.error('加载文件失败: ' + (error instanceof Error ? error.message : '未知错误'))
-    } finally {
-        editing.value = false
-    }
-}
+//         const ctx = canvas.getContext('2d', { willReadFrequently: true })
+//         if (ctx) {
+//             ctx.putImageData(imageData, 0, 0)
+//             mapLoaded.value = true
+//             ElMessage.success('地图加载成功')
+//         }
+//     } catch (error) {
+//         console.error('加载文件失败:', error)
+//         ElMessage.error('加载文件失败: ' + (error instanceof Error ? error.message : '未知错误'))
+//     } finally {
+//         editing.value = false
+//     }
+// }
 
 // 设置工具
 const setTool = (tool: 'brush' | 'rectangle' | 'eraser') => {
@@ -2794,11 +2795,13 @@ const saveMap = async () => {
         // 创建FormData上传到服务器
         const blob = new Blob([pgmData], { type: 'image/x-portable-graymap' })
         const formData = new FormData()
-        formData.append('file', blob, fileName)
-            formData.append('folderName', targetFolder)
+        formData.append('files', blob, fileName)
+        formData.append('folderName', targetFolder)
+        // 覆盖模式下，mapName 必填，使用当前地图名称
+        formData.append('mapName', selectedMapForEdit.value.displayName || 'Updated Map')
 
         // 上传到服务器
-        const response = await fetch('/api/maps/upload', {
+        const response = await fetch('/api/maps/save', {
             method: 'POST',
             body: formData
         })
@@ -2839,26 +2842,45 @@ const saveMap = async () => {
                 // 获取原地图文件夹下的所有文件（带超时）
                 uploadMapStatusText.value = '正在获取文件列表...'
                 uploadMapProgress.value = 5
-                let originalMapFiles: string[] = []
-                let originalQueueFiles: string[] = []
                 
-                // 为获取文件列表添加超时保护（移除重复的超时，因为mapUtils.ts中已经有了）
+                const filesToCopy: Array<{ path: string; targetPath: string }> = []
+                const sourceFolder = selectedMapForEdit.value.folderName
+
                 try {
-                    originalMapFiles = await getMapFiles(selectedMapForEdit.value.folderName)
+                    // 1. 获取 map 目录下的文件
+                    const mapRes = await fetch(`/api/maps/files?folder=${encodeURIComponent(sourceFolder)}&subDir=map`)
+                    if (mapRes.ok) {
+                        const mapData = await mapRes.json()
+                        if (mapData.success && mapData.files) {
+                            mapData.files.forEach((f: any) => {
+                                // 跳过 .pgm 文件，因为我们会上传新的
+                                if (!f.name.endsWith('.pgm')) {
+                                    filesToCopy.push({
+                                        path: `${sourceFolder}/map/${f.name}`,
+                                        targetPath: `map/${f.name}`
+                                    })
+                                }
+                            })
+                        }
+                    }
+
+                    // 2. 获取 queue 目录下的文件
+                    const queueRes = await fetch(`/api/maps/files?folder=${encodeURIComponent(sourceFolder)}&subDir=queue`)
+                    if (queueRes.ok) {
+                        const queueData = await queueRes.json()
+                        if (queueData.success && queueData.files) {
+                            queueData.files.forEach((f: any) => {
+                                filesToCopy.push({
+                                    path: `${sourceFolder}/queue/${f.name}`,
+                                    targetPath: `queue/${f.name}`
+                                })
+                            })
+                        }
+                    }
                 } catch (error) {
-                    console.warn('获取地图文件列表失败:', error)
-                    ElMessage.warning('无法获取地图文件列表，将只保存新的PGM文件')
-                    originalMapFiles = []
+                    console.warn('获取文件列表失败:', error)
+                    ElMessage.warning('获取部分文件失败，可能导致新地图文件不完整')
                 }
-                
-                try {
-                    originalQueueFiles = await getQueueFiles(selectedMapForEdit.value.folderName)
-                } catch (error) {
-                    console.warn('获取路线文件列表失败:', error)
-                    ElMessage.warning('无法获取路线文件列表，将只保存新的PGM文件')
-                    originalQueueFiles = []
-                }
-                
 
                 // 从原mapPath中提取原pgm文件名
                 const originalPathParts = selectedMapForEdit.value.mapPath.split('/')
@@ -2875,67 +2897,12 @@ const saveMap = async () => {
                 // 使用原文件名（如果原文件名存在），否则使用默认名称
                 const newPgmName = originalPgmName || 'map.pgm'
                 formData.append('files', blob, `map/${newPgmName}`)
-
-                // 计算总文件数（用于进度显示）
-                const totalFilesToCopy = originalMapFiles.filter(f => !f.endsWith('.pgm')).length + originalQueueFiles.length
                 
-                // 所有文件都通过服务器端复制，只传递路径信息
-                const filesToCopy: Array<{ path: string; targetPath: string }> = []
+                formData.append('filesToCopy', JSON.stringify(filesToCopy))
 
                 // 准备文件路径信息（所有文件都由服务器端复制）
                 uploadMapStatusText.value = '正在准备文件列表...'
-                uploadMapProgress.value = 10
-                
-                const mapFilesToCopy = originalMapFiles.filter(f => !f.endsWith('.pgm'))
-                const queueFilesToCopy = originalQueueFiles
-                
-                // 如果没有任何文件需要复制，直接跳到上传阶段
-                if (totalFilesToCopy === 0) {
-                    uploadMapProgress.value = 50
-                    uploadMapStatusText.value = '准备从本地文件上传到服务器...'
-                } else {
-                    // 所有文件都通过服务器端复制，只收集路径信息
-                    uploadMapStatusText.value = '正在准备文件列表...'
-                    uploadMapProgress.value = 20
-                    
-                    // 收集地图文件路径
-                    for (let i = 0; i < mapFilesToCopy.length; i++) {
-                        const filePath = mapFilesToCopy[i]
-                        const fileName = filePath.split('/').pop() || ''
-                        // 提取相对路径（从/maps/开始的部分）
-                        const relativePath = filePath.replace(/^\/maps\//, '')
-                        const targetPath = `map/${fileName}`
-                        filesToCopy.push({ path: relativePath, targetPath })
-                        
-                        // 更新进度（20% - 35%）
-                        const mapProgress = 20 + Math.round(((i + 1) / mapFilesToCopy.length) * 15)
-                        uploadMapProgress.value = Math.min(35, mapProgress)
-                    }
-                    
-                    // 收集queue文件路径
-                    uploadMapStatusText.value = '正在准备路线文件列表...'
-                    if (queueFilesToCopy.length > 0) {
-                        uploadMapProgress.value = 35
-                    }
-                    for (let i = 0; i < queueFilesToCopy.length; i++) {
-                        const filePath = queueFilesToCopy[i]
-                        const fileName = filePath.split('/').pop() || ''
-                        // 提取相对路径（从/maps/开始的部分）
-                        const relativePath = filePath.replace(/^\/maps\//, '')
-                        const targetPath = `queue/${fileName}`
-                        filesToCopy.push({ path: relativePath, targetPath })
-                        
-                        // 更新进度（35% - 50%）
-                        if (queueFilesToCopy.length > 0) {
-                            const queueProgress = 35 + Math.round(((i + 1) / queueFilesToCopy.length) * 15)
-                            uploadMapProgress.value = Math.min(50, queueProgress)
-                        }
-                    }
-                    
-                    // 确保准备阶段结束后进度到50%
-                    uploadMapProgress.value = 50
-                    uploadMapStatusText.value = '准备从本地文件上传到服务器...'
-                }
+                uploadMapProgress.value = 50
 
                 // 上传到服务器（使用 XMLHttpRequest 以支持进度和超时）
                 
@@ -3094,12 +3061,6 @@ const saveMap = async () => {
                         reject(new Error('上传已取消'))
                     })
 
-                    // 将所有文件路径信息添加到FormData，由服务器端复制
-                    if (filesToCopy.length > 0) {
-                        formData.append('filesToCopy', JSON.stringify(filesToCopy))
-                        uploadMapStatusText.value = `包含 ${filesToCopy.length} 个文件，将由服务器端复制`
-                    }
-                    
                     xhr.open('POST', '/api/maps/save-new-map')
                     xhr.send(formData)
                 })

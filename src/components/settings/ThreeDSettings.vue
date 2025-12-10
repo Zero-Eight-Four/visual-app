@@ -295,7 +295,7 @@ import {
     VideoPause,
     Refresh,
     Delete,
-    DeleteFilled,
+    // DeleteFilled,
     FolderOpened,
     FolderAdd,
     FolderDelete,

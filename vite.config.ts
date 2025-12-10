@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
-import { readdir, writeFile, mkdir, rm, readFile, rename, copyFile } from 'fs/promises'
+import { readdir, writeFile, mkdir, rm, readFile, rename, copyFile, stat, access } from 'fs/promises'
 import { join, extname, dirname } from 'path'
-import { createReadStream, createWriteStream, statSync } from 'fs'
+import { createReadStream, createWriteStream, statSync, constants } from 'fs'
 import { pipeline } from 'stream/promises'
 import http from 'http'
 import https from 'https'
@@ -36,7 +36,7 @@ async function processMultipartStream(
     }
 
     // 使用临时文件进行流式处理，避免将整个文件加载到内存
-    const tempDir = join(process.cwd(), 'temp')
+    const tempDir = join('/home/zeroef/visual-app', 'temp')
     const tempFilePath = join(tempDir, `upload_${Date.now()}_${Math.random().toString(36).substring(7)}`)
 
     // 确保临时目录存在
@@ -264,6 +264,12 @@ export default defineConfig({
     {
       name: 'maps-directory-listing',
       configureServer(server) {
+        // Debug middleware to log all API requests
+        // server.middlewares.use((req, res, next) => {
+        //   console.log(`[Global Middleware] ${req.method} ${req.url}`)
+        //   next()
+        // })
+
         // 处理文件上传API - 使用优化的流式处理
         server.middlewares.use('/api/maps/upload', async (req, res) => {
           if (req.method !== 'POST') {
@@ -274,7 +280,7 @@ export default defineConfig({
           }
 
           await processMultipartStream(req, res, async (fields, files) => {
-            const mapsDir = join(process.cwd(), 'maps')
+            const mapsDir = join('/home/zeroef/visual-app', 'maps')
             let fileName = ''
             let fileData: Buffer | null = null
             let folderName = fields.folderName || ''
@@ -322,7 +328,7 @@ export default defineConfig({
         // API: 列出 maps 目录下的所有文件夹
         server.middlewares.use('/api/maps/list', async (req, res) => {
           try {
-            const mapsDir = join(process.cwd(), 'maps')
+            const mapsDir = join('/home/zeroef/visual-app', 'maps')
             const entries = await readdir(mapsDir, { withFileTypes: true })
             const folders = entries
               .filter((entry) => entry.isDirectory())
@@ -330,6 +336,54 @@ export default defineConfig({
 
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify({ success: true, folders }))
+          } catch (error) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: String(error) }))
+          }
+        })
+
+        // API: 列出指定地图文件夹下的文件
+        server.middlewares.use('/api/maps/files', async (req, res) => {
+          try {
+            const url = new URL(req.url || '', `http://${req.headers.host}`)
+            const folderName = url.searchParams.get('folder')
+            const subDir = url.searchParams.get('subDir') || ''
+
+            if (!folderName) {
+              res.statusCode = 400
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: 'Missing folder parameter' }))
+              return
+            }
+
+            const mapsDir = join('/home/zeroef/visual-app', 'maps')
+            // Prevent directory traversal
+            if (folderName.includes('..') || subDir.includes('..')) {
+              res.statusCode = 403
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: 'Invalid path' }))
+              return
+            }
+
+            const targetDir = join(mapsDir, folderName, subDir)
+
+            try {
+              const entries = await readdir(targetDir, { withFileTypes: true })
+              const files = entries
+                .filter(entry => entry.isFile())
+                .map(entry => ({
+                  name: entry.name,
+                  url: `/maps/${folderName}/${subDir ? subDir + '/' : ''}${entry.name}`
+                }))
+
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: true, files }))
+            } catch (err) {
+              // Directory might not exist, return empty list
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: true, files: [] }))
+            }
           } catch (error) {
             res.statusCode = 500
             res.setHeader('Content-Type', 'application/json')
@@ -358,7 +412,7 @@ export default defineConfig({
               return
             }
 
-            const mapsDir = join(process.cwd(), 'maps')
+            const mapsDir = join('/home/zeroef/visual-app', 'maps')
             const targetDir = join(mapsDir, decodeURIComponent(folderName))
 
             // 检查目录是否存在
@@ -393,7 +447,7 @@ export default defineConfig({
           }
 
           await processMultipartStream(req, res, async (fields, files) => {
-            const mapsDir = join(process.cwd(), 'maps')
+            const mapsDir = join('/home/zeroef/visual-app', 'maps')
             const folderName = fields.folderName || ''
             const mapName = fields.mapName || ''
             const description = fields.description || ''
@@ -443,7 +497,7 @@ export default defineConfig({
           }
 
           await processMultipartStream(req, res, async (fields, files) => {
-            const mapsDir = join(process.cwd(), 'maps')
+            const mapsDir = join('/home/zeroef/visual-app', 'maps')
             const folderName = fields.folderName || ''
             const mapName = fields.mapName || ''
             const description = fields.description || ''
@@ -517,7 +571,7 @@ export default defineConfig({
             return
           }
 
-          const videosDir = join(process.cwd(), 'videos')
+          const videosDir = join('/home/zeroef/visual-app', 'videos')
           await mkdir(videosDir, { recursive: true })
 
           await processMultipartStream(req, res, async (fields, files) => {
@@ -562,60 +616,50 @@ export default defineConfig({
         // API: 列出所有视频（按日期文件夹组织）
         server.middlewares.use('/api/videos/list', async (req, res) => {
           try {
-            const videosDir = join(process.cwd(), 'videos')
+            const videosDir = join('/home/zeroef/visual-app', 'videos')
             await mkdir(videosDir, { recursive: true })
 
             const entries = await readdir(videosDir, { withFileTypes: true })
-            const folders: Array<{ folder: string; date: string; count: number; videos: Array<{ name: string; size: string; modified: string; folder: string }> }> = []
+            const dates: string[] = []
+            const videosMap: Record<string, any[]> = {}
 
             for (const entry of entries) {
               if (entry.isDirectory() && /^\d{8}$/.test(entry.name)) {
                 // 是日期文件夹（YYYYMMDD格式）
                 const folderPath = join(videosDir, entry.name)
                 const videoEntries = await readdir(folderPath, { withFileTypes: true })
-                const videos: Array<{ name: string; size: string; modified: string; folder: string }> = []
-
-                for (const videoEntry of videoEntries) {
-                  if (videoEntry.isFile() && videoEntry.name.endsWith('.webm')) {
-                    const filePath = join(folderPath, videoEntry.name)
-                    const stats = statSync(filePath)
-                    const sizeInMB = (stats.size / (1024 * 1024)).toFixed(2)
-                    const modified = stats.mtime.toLocaleString('zh-CN')
-
-                    videos.push({
-                      name: videoEntry.name,
-                      size: `${sizeInMB} MB`,
-                      modified,
-                      folder: entry.name
-                    })
-                  }
-                }
-
-                // 按修改时间倒序排列
-                videos.sort((a, b) => {
-                  const aTime = statSync(join(folderPath, a.name)).mtime.getTime()
-                  const bTime = statSync(join(folderPath, b.name)).mtime.getTime()
-                  return bTime - aTime
-                })
+                const videos: Array<{ name: string; path: string; size: number; modified: number }> = []
 
                 // 格式化日期显示（YYYYMMDD -> YYYY-MM-DD）
                 const dateStr = entry.name
                 const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`
 
-                folders.push({
-                  folder: entry.name,
-                  date: formattedDate,
-                  count: videos.length,
-                  videos
-                })
+                for (const videoEntry of videoEntries) {
+                  if (videoEntry.isFile() && (videoEntry.name.endsWith('.webm') || videoEntry.name.endsWith('.mp4'))) {
+                    const filePath = join(folderPath, videoEntry.name)
+                    const stats = statSync(filePath)
+
+                    videos.push({
+                      name: videoEntry.name,
+                      path: filePath, // Use absolute path for backend compatibility
+                      size: stats.size,
+                      modified: stats.mtime.getTime() / 1000
+                    })
+                  }
+                }
+
+                if (videos.length > 0) {
+                  dates.push(formattedDate)
+                  videosMap[formattedDate] = videos
+                }
               }
             }
 
-            // 按日期倒序排列（最新的在前）
-            folders.sort((a, b) => b.folder.localeCompare(a.folder))
+            // 按日期倒序排列
+            dates.sort((a, b) => b.localeCompare(a))
 
             res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ success: true, folders }))
+            res.end(JSON.stringify({ dates, videos: videosMap }))
           } catch (error) {
             res.statusCode = 500
             res.setHeader('Content-Type', 'application/json')
@@ -626,7 +670,7 @@ export default defineConfig({
         // API: 下载视频
         server.middlewares.use('/api/videos/download', async (req, res) => {
           try {
-            const videosDir = join(process.cwd(), 'videos')
+            const videosDir = join('/home/zeroef/visual-app', 'videos')
             const url = new URL(req.url || '', `http://${req.headers.host}`)
             const fileName = url.searchParams.get('fileName') || ''
             const folder = url.searchParams.get('folder') || ''
@@ -704,7 +748,7 @@ export default defineConfig({
           }
 
           try {
-            const videosDir = join(process.cwd(), 'videos')
+            const videosDir = join('/home/zeroef/visual-app', 'videos')
             const chunks: Buffer[] = []
 
             req.on('data', (chunk: Buffer) => {
@@ -755,6 +799,66 @@ export default defineConfig({
           }
         })
 
+        // API: 删除历史报告
+        server.middlewares.use('/api/local/reports/delete', async (req, res) => {
+          if (req.method !== 'DELETE') {
+            res.statusCode = 405
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }))
+            return
+          }
+
+          try {
+            const url = new URL(req.url || '', `http://${req.headers.host}`)
+            const fileName = url.searchParams.get('fileName') || ''
+
+            if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
+              res.statusCode = 400
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
+              return
+            }
+
+            const reportsDir = '/home/sll/Qwen/backend/results/reports'
+            const filePath = join(reportsDir, fileName)
+
+            try {
+              // Check if file exists and is accessible
+              try {
+                await access(filePath, constants.W_OK)
+              } catch (e: any) {
+                // Don't return here, try rm anyway, or return specific error
+                if (e.code === 'ENOENT') {
+                  res.statusCode = 404
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'File not found' }))
+                  return
+                }
+                if (e.code === 'EACCES') {
+                  res.statusCode = 403
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'Permission denied' }))
+                  return
+                }
+              }
+
+              await rm(filePath)
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: true, message: 'Report deleted successfully' }))
+            } catch (error: any) {
+              console.error(`[Middleware] Delete failed: ${error.message}`)
+              res.statusCode = 500
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: `Delete failed: ${error.message}` }))
+            }
+          } catch (error) {
+            console.error(`[Middleware] Unexpected error: ${error}`)
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ success: false, error: String(error) }))
+          }
+        })
+
         // API: 重命名视频
         server.middlewares.use('/api/videos/rename', async (req, res) => {
           if (req.method !== 'POST') {
@@ -765,7 +869,7 @@ export default defineConfig({
           }
 
           try {
-            const videosDir = join(process.cwd(), 'videos')
+            const videosDir = join('/home/zeroef/visual-app', 'videos')
             const chunks: Buffer[] = []
 
             req.on('data', (chunk: Buffer) => {
@@ -777,11 +881,19 @@ export default defineConfig({
                 const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
                 const oldName = body.oldName || ''
                 const newName = body.newName || ''
+                const folder = body.folder || ''
 
                 if (!oldName || !newName || oldName.includes('..') || newName.includes('..') || oldName.includes('/') || newName.includes('/')) {
                   res.statusCode = 400
                   res.setHeader('Content-Type', 'application/json')
                   res.end(JSON.stringify({ success: false, error: 'Invalid file name' }))
+                  return
+                }
+
+                if (folder && (folder.includes('..') || folder.includes('/') || folder.includes('\\') || !/^\d{8}$/.test(folder))) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ success: false, error: 'Invalid folder name' }))
                   return
                 }
 
@@ -794,8 +906,8 @@ export default defineConfig({
                   return
                 }
 
-                const oldPath = join(videosDir, oldName)
-                const newPath = join(videosDir, safeNewName)
+                const oldPath = folder ? join(videosDir, folder, oldName) : join(videosDir, oldName)
+                const newPath = folder ? join(videosDir, folder, safeNewName) : join(videosDir, safeNewName)
 
                 try {
                   await rename(oldPath, newPath)
@@ -913,7 +1025,7 @@ export default defineConfig({
                     return
                   }
 
-                  const mapsDir = join(process.cwd(), 'maps')
+                  const mapsDir = join('/home/zeroef/visual-app', 'maps')
                   const targetFolderPath = join(mapsDir, folderName)
 
                   // 创建目标文件夹
@@ -1246,7 +1358,7 @@ export default defineConfig({
                   return
                 }
 
-                const mapsDir = join(process.cwd(), 'maps')
+                const mapsDir = join('/home/zeroef/visual-app', 'maps')
                 const results: Array<{ file: string; success: boolean; error?: string; size?: number }> = []
 
                 // 1. 先计算所有文件的总大小
@@ -1468,7 +1580,7 @@ export default defineConfig({
                       // 流式传输文件内容，并跟踪实际发送进度
                       // 使用 pipe 方法自动处理流，避免将文件读取到内存
                       const fileStream = createReadStream(filePath, {
-                        highWaterMark: 64 * 1024 * 1024 // 64MB 缓冲区，避免占用过多内存
+                        highWaterMark: 10 * 1024 * 1024 // 10MB 缓冲区，避免占用过多内存
                       })
 
                       // 使用定时器定期检查实际发送的字节数
@@ -1654,7 +1766,7 @@ export default defineConfig({
         // 处理 maps 目录的文件服务（支持文件夹结构）
         server.middlewares.use('/maps', async (req, res) => {
           try {
-            const mapsDir = join(process.cwd(), 'maps')
+            const mapsDir = join('/home/zeroef/visual-app', 'maps')
             const urlPath = req.url || '/'
 
             // 如果是根路径，返回目录列表（列出所有文件夹）
@@ -1795,10 +1907,51 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    host: true
+    host: true,
+    proxy: {
+      '/api/detect': {
+        target: 'http://8.148.247.53:8000',
+        changeOrigin: true
+      },
+      '/api/streams': {
+        target: 'http://8.148.247.53:8000',
+        changeOrigin: true
+      },
+      '/api/reports': {
+        target: 'http://8.148.247.53:8000',
+        changeOrigin: true
+      },
+      '/api/history': {
+        target: 'http://8.148.247.53:8000',
+        changeOrigin: true
+      },
+      '/api/schedules': {
+        target: 'http://8.148.247.53:8000',
+        changeOrigin: true
+      }
+    }
   },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: false,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('three')) {
+              return 'three-vendor'
+            }
+            if (id.includes('element-plus')) {
+              return 'element-plus'
+            }
+            return 'vendor'
+          }
+        }
+      }
+    }
+  },
+  define: {
+    global: 'window'
   }
 })

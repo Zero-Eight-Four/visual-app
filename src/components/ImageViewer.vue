@@ -63,8 +63,16 @@
         <el-dialog v-model="showVideoManagerDialog" title="视频管理" width="800px" @open="loadVideoList">
             <el-table :data="videoList" style="width: 100%" max-height="400">
                 <el-table-column prop="name" label="文件名" width="300" />
-                <el-table-column prop="size" label="大小" width="120" />
-                <el-table-column prop="modified" label="修改时间" width="180" />
+                <el-table-column prop="size" label="大小" width="120">
+                    <template #default="{ row }">
+                        {{ typeof row.size === 'number' ? (row.size / 1024 / 1024).toFixed(2) + ' MB' : row.size }}
+                    </template>
+                </el-table-column>
+                <el-table-column prop="modified" label="修改时间" width="180">
+                    <template #default="{ row }">
+                        {{ typeof row.modified === 'number' ? new Date(row.modified * 1000).toLocaleString() : row.modified }}
+                    </template>
+                </el-table-column>
                 <el-table-column label="操作" width="200" fixed="right">
                     <template #default="{ row }">
                         <el-button size="small" @click="handleRenameVideo(row)">重命名</el-button>
@@ -359,10 +367,31 @@ const loadVideoList = async () => {
         const response = await fetch('/api/videos/list')
         const result = await response.json()
 
-        if (result.success) {
+        if (result.dates && result.videos) {
+            // Flatten videos for table
+            const allVideos: any[] = []
+            result.dates.forEach((date: string) => {
+                if (result.videos[date]) {
+                    const folderName = date.replace(/-/g, '')
+                    const videosWithFolder = result.videos[date].map((v: any) => ({ ...v, folder: folderName }))
+                    allVideos.push(...videosWithFolder)
+                }
+            })
+            videoList.value = allVideos
+        } else if (result.success && result.folders) {
+             // Fallback for old format
+             const allVideos: any[] = []
+             result.folders.forEach((folder: any) => {
+                 if (folder.videos) {
+                     allVideos.push(...folder.videos)
+                 }
+             })
+             videoList.value = allVideos
+        } else if (result.success && result.videos) {
+            // Another potential old format
             videoList.value = result.videos || []
         } else {
-            ElMessage.error('加载视频列表失败: ' + (result.error || '未知错误'))
+            ElMessage.error('加载视频列表失败: 格式错误')
         }
     } catch (error) {
         console.error('加载视频列表失败:', error)
@@ -423,7 +452,7 @@ const handleDownloadVideo = (video: { name: string }) => {
 }
 
 // 删除视频
-const handleDeleteVideo = async (video: { name: string }) => {
+const handleDeleteVideo = async (video: { name: string; folder?: string }) => {
     try {
         await ElMessageBox.confirm(
             `确定要删除视频 "${video.name}" 吗？`,
@@ -440,7 +469,10 @@ const handleDeleteVideo = async (video: { name: string }) => {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ fileName: video.name })
+            body: JSON.stringify({ 
+                fileName: video.name,
+                folder: video.folder
+            })
         })
 
         const result = await response.json()

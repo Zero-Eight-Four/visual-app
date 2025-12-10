@@ -128,10 +128,10 @@
         </el-dialog>
 
         <!-- AI Dialog -->
-        <el-dialog v-model="aiDialogVisible" title="AI助手" width="600px">
+        <el-dialog v-model="aiDialogVisible" title="AI助手" width="800px" :before-close="handleAIClose">
             <div class="ai-dialog-content">
-                <div class="ai-feature-list">
-                    <div class="ai-feature-item">
+                <div v-if="!currentAIFeature" class="ai-feature-list">
+                    <div class="ai-feature-item" @click="currentAIFeature = 'vision'">
                         <el-icon :size="32" color="#409EFF">
                             <View />
                         </el-icon>
@@ -146,6 +146,17 @@
                         <p>通过语音控制机器狗</p>
                     </div>
                 </div>
+                
+                <div v-else-if="currentAIFeature === 'vision'" class="ai-feature-view">
+                    <div class="feature-header" style="margin-bottom: 15px;">
+                        <el-button link @click="currentAIFeature = null">
+                            &lt; 返回菜单
+                        </el-button>
+                    </div>
+                    <div style="height: 600px;">
+                        <AIPanel />
+                    </div>
+                </div>
             </div>
             <template #footer>
                 <el-button @click="aiDialogVisible = false">关闭</el-button>
@@ -157,15 +168,15 @@
 <script setup lang="ts">
 import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
 import { ElDialog, ElButton, ElIcon, ElMessage } from 'element-plus'
-import { DataAnalysis, View, Position, Connection, TrendCharts } from '@element-plus/icons-vue'
+import { DataAnalysis, View, Connection } from '@element-plus/icons-vue'
 import ThreeDPanel from '@/components/panels/ThreeDPanel.vue'
 import ImagePanel from '@/components/panels/ImagePanel.vue'
 import RobotStatusPanel from '@/components/panels/RobotStatusPanel.vue'
 import MapToolsPanel from '@/components/panels/MapToolsPanel.vue'
+import AIPanel from '@/components/panels/AIPanel.vue'
 import ThreeDSettings from '@/components/settings/ThreeDSettings.vue'
 import ImageSettings from '@/components/settings/ImageSettings.vue'
 import { rosConnection } from '@/services/rosConnection'
-import { useRosStore } from '@/stores/ros'
 
 // 3D面板引用
 const threeDPanelRef = ref()
@@ -186,7 +197,6 @@ const aiDialogVisible = ref(false)
 // 断连警告状态
 const disconnectWarningVisible = ref(false)
 const disconnectTime = ref('')
-const rosStore = useRosStore()
 
 // 断连回调函数
 const handleDisconnect = () => {
@@ -243,9 +253,19 @@ const currentSettingsTitle = computed(() => {
     return '设置'
 })
 
+// 当前选中的AI功能
+const currentAIFeature = ref<string | null>(null)
+
 // 打开AI对话框
 const openAIDialog = () => {
+    currentAIFeature.value = null
     aiDialogVisible.value = true
+}
+
+// 处理AI对话框关闭
+const handleAIClose = () => {
+    aiDialogVisible.value = false
+    currentAIFeature.value = null
 }
 </script>
 

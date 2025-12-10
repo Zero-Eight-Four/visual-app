@@ -151,7 +151,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElButton, ElButtonGroup, ElInput, ElIcon, ElMessage, ElMessageBox, ElDialog, ElScrollbar, ElBreadcrumb, ElBreadcrumbItem, ElUpload } from 'element-plus'
 import { Folder, Document, Upload, Download, Delete, Refresh, FolderAdd, Search, Loading, FolderOpened, UploadFilled, CopyDocument } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
-import { HttpFileTransferClient, createHttpFileTransferClient, type HttpFileItem } from '@/utils/httpFileTransferUtils'
+import { HttpFileTransferClient, createHttpFileTransferClient } from '@/utils/httpFileTransferUtils'
 
 // 文件项接口（兼容 HTTP 传输）
 interface FileItem {
@@ -333,7 +333,7 @@ const handleUpload = async () => {
         await httpClient.value.uploadFile(
             selectedFile.value,
             uploadDestinationPath.value,
-            (progress) => {
+            (_progress) => {
             }
         )
         ElMessage.success('文件上传成功')
@@ -371,7 +371,7 @@ const handleDownload = async (item: FileItem) => {
         // 使用 HTTP API 下载（支持进度）
         const blob = await httpClient.value.downloadFile(
             item.path,
-            (progress) => {
+            (_progress) => {
             }
         )
         

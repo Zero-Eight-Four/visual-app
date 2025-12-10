@@ -1,88 +1,96 @@
-# Dependencies
+# 依赖
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-# Note: package-lock.json should be committed for consistency
+lerna-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# Build outputs
+# 构建输出
 dist/
+dist-ssr/
 build/
 *.local
+.vite/
 
-# Environment variables
+# 环境变量
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*.local
+.env.production
+.env.development
 
-# IDE
-.github/
-.vscode/*
+# 编辑器/IDE
+.vscode/
 .idea/
 *.swp
 *.swo
+*~
+.DS_Store
 *.sublime-project
 *.sublime-workspace
-*.code-workspace
 
-# OS
+# 操作系统
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
-desktop.ini
+Desktop.ini
 
-# Logs
+# 日志文件
 logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+.pnpm-debug.log*
 
-# Runtime data
-pids/
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
+# 测试覆盖率
 coverage/
 *.lcov
 .nyc_output/
 
-# Vite
-.vite/
-.vite-cache/
-
-# Cache
+# 临时文件
+tmp/
+temp/
+*.tmp
 .cache/
-.parcel-cache/
-.eslintcache
-.stylelintcache
 
-# User uploaded files
+# 项目特定的数据目录（包含用户上传的数据）
 maps/
 videos/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+reports/
+temp/
 
-# Temporary files
-.temp/
-*.tmp
-*.temp
-*.bak
-*.swp
-*~
+# TypeScript
+*.tsbuildinfo
+.tsbuildinfo
 
-# Editor directories and files
-.idea
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# ESLint 缓存
+.eslintcache
+
+# Prettier 缓存
+.prettiercache
+
+# 服务器相关
+server/dist/
+server/build/
+server/*.log
+
+# PM2
+.pm2/
+ecosystem.config.js.bak
+
+# 其他
+*.pem
+*.key
+*.cert
+.cursor/
+.vscode-test/

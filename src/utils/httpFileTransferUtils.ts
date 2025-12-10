@@ -254,7 +254,6 @@ export class HttpFileTransferClient {
         const reader = response.body.getReader()
         const chunks: Uint8Array[] = []
         let receivedLength = 0
-        let readErrorOccurred = false
         let readError: Error | null = null
 
         try {
@@ -279,7 +278,6 @@ export class HttpFileTransferClient {
             }
           }
         } catch (err) {
-          readErrorOccurred = true
           readError = err instanceof Error ? err : new Error(String(err))
           reader.cancel().catch(() => { })
 

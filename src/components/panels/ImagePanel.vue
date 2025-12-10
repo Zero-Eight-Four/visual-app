@@ -34,7 +34,7 @@ import { rosConnection } from '@/services/rosConnection'
 import type { RosMessage } from '@/types/ros'
 
 // 定义 props
-const props = defineProps<{
+defineProps<{
     isExpanded?: boolean
 }>()
 

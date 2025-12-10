@@ -182,12 +182,12 @@
                                     </el-table-column>
                                     <el-table-column prop="size" label="大小" width="120" align="right">
                                         <template #default="{ row: video }">
-                                            <span class="video-size">{{ video.size }}</span>
+                                            <span class="video-size">{{ typeof video.size === 'number' ? (video.size / 1024 / 1024).toFixed(2) + ' MB' : video.size }}</span>
                                         </template>
                                     </el-table-column>
                                     <el-table-column prop="modified" label="修改时间" width="200" align="center">
                                         <template #default="{ row: video }">
-                                            <span class="video-time">{{ video.modified }}</span>
+                                            <span class="video-time">{{ typeof video.modified === 'number' ? new Date(video.modified * 1000).toLocaleString() : video.modified }}</span>
                                         </template>
                                     </el-table-column>
                                     <el-table-column label="操作" width="320" fixed="right" align="center">
@@ -594,14 +594,30 @@ const loadVideoList = async () => {
         const response = await fetch('/api/videos/list')
         const result = await response.json()
 
-        if (result.success) {
-            videoList.value = result.folders || []
+        if (result.dates && result.videos) {
+            // Adapt new format to component structure
+            videoList.value = result.dates.map((date: string) => {
+                const folderName = date.replace(/-/g, '')
+                return {
+                    folder: folderName,
+                    date: date,
+                    count: result.videos[date].length,
+                    videos: result.videos[date].map((v: any) => ({ ...v, folder: folderName }))
+                }
+            })
+            
             // 默认展开第一个文件夹
             if (videoList.value.length > 0) {
                 defaultExpandKeys.value = [videoList.value[0].folder]
             }
+        } else if (result.success && result.folders) {
+            // Fallback for old format
+            videoList.value = result.folders || []
+            if (videoList.value.length > 0) {
+                defaultExpandKeys.value = [videoList.value[0].folder]
+            }
         } else {
-            ElMessage.error('加载视频列表失败: ' + (result.error || '未知错误'))
+            ElMessage.error('加载视频列表失败: 格式错误')
         }
     } catch (error) {
         console.error('加载视频列表失败:', error)
