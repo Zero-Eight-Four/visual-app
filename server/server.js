@@ -20,6 +20,10 @@ const mqBridgePromise = getRocketMQBridge();
 // Request logging middleware
 app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+    // Handle URL prefix from gateway
+    if (req.url.startsWith('/cscec-robot-dog')) {
+        req.url = req.url.replace('/cscec-robot-dog', '');
+    }
     next();
 });
 
@@ -1606,12 +1610,12 @@ app.delete('/api/schedules/:id', async (req, res) => {
 });
 
 // Proxy all other API requests to Python backend
-app.use('/cscec-robot-dog', createProxyMiddleware({
+app.use('/api', createProxyMiddleware({
     target: TARGET_API,
     changeOrigin: true,
     ws: true,
     pathRewrite: {
-        '^/': '/cscec-robot-dog/'
+        '^/': '/api/'
     }
 }));
 

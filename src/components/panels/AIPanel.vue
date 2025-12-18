@@ -292,11 +292,11 @@ const submitBatchServerVideos = async () => {
 
 const getReportFullUrl = (url: string) => {
     // If URL is absolute and points to the backend IP, convert to relative /api path
-    if (url.startsWith('http://8.148.247.53:8000')) {
-        return url.replace('http://8.148.247.53:8000', '/api')
+    if (url.startsWith('https://ibl.zjypwy.com/cscec-robot-dog/api')) {
+        return url.replace('https://ibl.zjypwy.com/cscec-robot-dog/api', '/api')
     }
-    if (url.startsWith('http://8.148.247.53')) {
-        return url.replace('http://8.148.247.53', '')
+    if (url.startsWith('https://ibl.zjypwy.com/cscec-robot-dog')) {
+        return url.replace('https://ibl.zjypwy.com/cscec-robot-dog', '')
     }
     
     if (url.startsWith('http')) return url

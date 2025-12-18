@@ -1916,23 +1916,23 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api/detect': {
-        target: 'http://8.148.247.53:8000',
+        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
         changeOrigin: true
       },
       '/api/streams': {
-        target: 'http://8.148.247.53:8000',
+        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
         changeOrigin: true
       },
       '/api/reports': {
-        target: 'http://8.148.247.53:8000',
+        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
         changeOrigin: true
       },
       '/api/history': {
-        target: 'http://8.148.247.53:8000',
+        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
         changeOrigin: true
       },
       '/api/schedules': {
-        target: 'http://8.148.247.53:8000',
+        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
         changeOrigin: true
       }
     }
