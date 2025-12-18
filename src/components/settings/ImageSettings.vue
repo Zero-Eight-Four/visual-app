@@ -70,66 +70,50 @@
                             <div class="ptz-cell empty" />
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowUp" circle size="small"
-                                    @click="publishPtzCommand('ptz_up')" />
+                                    @click="publishPtzCommand('rotate_up')" title="上转" />
                             </div>
                             <div class="ptz-cell empty" />
                         </div>
                         <div class="ptz-row">
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowLeft" circle size="small"
-                                    @click="publishPtzCommand('ptz_left')" />
+                                    @click="publishPtzCommand('rotate_left')" title="左转" />
                             </div>
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn ptz-stop" circle size="small"
-                                    @click="publishPtzCommand('ptz_stop')">
+                                    @click="publishPtzCommand('center')" title="居中">
                                     <el-icon>
-                                        <CircleClose />
+                                        <Position />
                                     </el-icon>
                                 </el-button>
                             </div>
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowRight" circle size="small"
-                                    @click="publishPtzCommand('ptz_right')" />
+                                    @click="publishPtzCommand('rotate_right')" title="右转" />
                             </div>
                         </div>
                         <div class="ptz-row">
                             <div class="ptz-cell empty" />
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowDown" circle size="small"
-                                    @click="publishPtzCommand('ptz_down')" />
+                                    @click="publishPtzCommand('rotate_down')" title="下转" />
                             </div>
                             <div class="ptz-cell empty" />
                         </div>
                     </div>
 
-                    <!-- 缩放和旋转 -->
+                    <!-- 缩放和功能 -->
                     <div class="ptz-controls">
                         <div class="control-group">
                             <span class="control-label">缩放</span>
                             <div class="control-buttons">
                                 <el-button class="ptz-btn" :icon="ZoomOut" circle size="small"
-                                    @click="publishPtzCommand('ptz_zoom_out')" />
+                                    @click="publishPtzCommand('zoom_out')" title="缩小" />
                                 <el-button class="ptz-btn" :icon="ZoomIn" circle size="small"
-                                    @click="publishPtzCommand('ptz_zoom_in')" />
+                                    @click="publishPtzCommand('zoom_in')" title="放大" />
                             </div>
                         </div>
-                        <div class="control-group">
-                            <span class="control-label">旋转</span>
-                            <div class="control-buttons">
-                                <el-button class="ptz-btn" circle size="small"
-                                    @click="publishPtzCommand('ptz_spin_left')">
-                                    <el-icon>
-                                        <RefreshLeft />
-                                    </el-icon>
-                                </el-button>
-                                <el-button class="ptz-btn" circle size="small"
-                                    @click="publishPtzCommand('ptz_spin_right')">
-                                    <el-icon>
-                                        <RefreshRight />
-                                    </el-icon>
-                                </el-button>
-                            </div>
-                        </div>
+    
                     </div>
                 </div>
             </div>
@@ -280,9 +264,6 @@ import {
     ArrowRight,
     ZoomIn,
     ZoomOut,
-    CircleClose,
-    RefreshLeft,
-    RefreshRight,
     VideoCamera,
     VideoPause,
     FolderOpened,
@@ -320,7 +301,7 @@ watch(() => settingsStore.selectedTopic, (val) => { selectedTopic.value = val })
 
 // PTZ 控制相关
 const publishPtzCommand = async (command: string) => {
-    const topic = `/camera/${command}`
+    const topic = `/siyi_camera_control/${command}`
 
     if (!rosConnection.isConnected()) {
         return
@@ -376,7 +357,6 @@ const getCanvas = (): HTMLCanvasElement | null => {
             return null
         }
 
-        // imageCanvas 已经被 Vue 自动解包，直接使用即可
         const canvas = imagePanelRef.value.imageCanvas as HTMLCanvasElement | null
 
         if (!canvas) {
@@ -679,10 +659,18 @@ const confirmRenameVideo = async () => {
 
 // 下载视频
 const handleDownloadVideo = (video: { name: string; folder: string }) => {
-    const url = `/api/videos/download?fileName=${encodeURIComponent(video.name)}&folder=${encodeURIComponent(video.folder)}`
+    console.log('Download video:', video)
+    console.log('Current origin:', window.location.origin)
+
+    const path = `/api/videos/download?fileName=${encodeURIComponent(video.name)}&folder=${encodeURIComponent(video.folder)}`
+    // Construct absolute URL using current origin to ensure protocol matches
+    const url = new URL(path, window.location.origin).href
+    console.log('Download URL:', url)
+    
     const link = document.createElement('a')
     link.href = url
     link.download = video.name
+    link.target = '_blank' // Open in new tab to avoid mixed content issues
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)

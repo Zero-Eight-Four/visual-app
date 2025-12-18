@@ -26,11 +26,6 @@
                                         {{ (scope.row.size / 1024 / 1024).toFixed(2) }} MB
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="操作" width="120">
-                                    <template #default="scope">
-                                        <el-button size="small" type="primary" @click="detectSingleServerVideo(scope.row)">检测</el-button>
-                                    </template>
-                                </el-table-column>
                             </el-table>
                             
                             <div style="margin-top: 15px; text-align: left;">
@@ -215,7 +210,11 @@ import { ElMessage, ElEmpty, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { aiService, type Stream, type Report } from '../../services/aiService'
 
-const activeTab = ref('video')
+const props = defineProps<{
+    initialTab?: string
+}>()
+
+const activeTab = ref(props.initialTab || 'video')
 const loading = ref(false)
 const detectionResults = ref<any[]>([])
 
@@ -258,12 +257,6 @@ const handleSelectionChange = (val: any[]) => {
     selectedVideos.value = val
 }
 
-const detectSingleServerVideo = async (_video: any) => {
-    // 目前后端仅支持文件夹批量检测，不支持单文件路径检测
-    // 临时方案：提示用户使用批量检测
-    ElMessage.info('请勾选视频后使用"批量检测选中视频"功能')
-}
-
 const submitBatchServerVideos = async () => {
     if (selectedVideos.value.length === 0) return
     
@@ -271,7 +264,12 @@ const submitBatchServerVideos = async () => {
     // 假设同一日期的视频在同一文件夹下
     const firstVideo = selectedVideos.value[0]
     // 提取文件夹路径 (去掉文件名)
-    const folderPath = firstVideo.path.substring(0, firstVideo.path.lastIndexOf('/')) || 'videos'
+    let folderPath = firstVideo.path.substring(0, firstVideo.path.lastIndexOf('/')) || 'videos'
+
+    // Fix path for Python backend (Docker /app/videos -> Host /home/zeroef/visual-app/videos)
+    if (folderPath.startsWith('/app/videos')) {
+        folderPath = folderPath.replace('/app/videos', '/home/zeroef/visual-app/videos')
+    }
     
     loading.value = true
     detectionResults.value = []
@@ -293,9 +291,17 @@ const submitBatchServerVideos = async () => {
 // Video Detection (Single Upload) - Removed
 
 const getReportFullUrl = (url: string) => {
+    // If URL is absolute and points to the backend IP, convert to relative /api path
+    if (url.startsWith('http://8.148.247.53:8000')) {
+        return url.replace('http://8.148.247.53:8000', '/api')
+    }
+    if (url.startsWith('http://8.148.247.53')) {
+        return url.replace('http://8.148.247.53', '')
+    }
+    
     if (url.startsWith('http')) return url
-    const baseUrl = "http://8.148.247.53:8000"
-    return `${baseUrl}${url}`
+    // Use relative path to support both HTTP and HTTPS
+    return url.startsWith('/') ? url : `/${url}`
 }
 
 // Streams
@@ -504,9 +510,9 @@ const deleteReport = async (filename: string) => {
 }
 
 onMounted(() => {
-    refreshStreams()
-    refreshReports()
-    refreshVideoList()
+    if (activeTab.value === 'streams') refreshStreams()
+    else if (activeTab.value === 'reports') refreshReports()
+    else if (activeTab.value === 'video') refreshVideoList()
 })
 </script>
 
@@ -576,5 +582,9 @@ onMounted(() => {
     text-align: center;
     color: #999;
     padding: 40px 0;
+}
+
+.connection-warning {
+    margin-bottom: 20px;
 }
 </style>

@@ -20,6 +20,13 @@
                                 </el-icon>
                                 {{ isNavigationRunning ? '停止' : '加载地图' }}
                             </el-button>
+                            <el-button type="primary" plain size="small" style="flex: 1"
+                                :disabled="!isConnected" @click="showControlDialog = true">
+                                <el-icon style="margin-right: 4px">
+                                    <SwitchButton />
+                                </el-icon>
+                                机器狗控制
+                            </el-button>
                         </div>
                         <div v-if="isNavigationRunning"
                             style="margin-top: 8px; padding: 8px; background-color: #f0f9ff; border-radius: 4px; font-size: 12px; color: #409eff;">
@@ -28,6 +35,23 @@
                             </el-icon>
                             导航系统运行中
                         </div>
+                    </div>
+                </div>
+
+                <!-- 安全设置 -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <el-icon>
+                            <Warning />
+                        </el-icon>
+                        <span>安全设置</span>
+                    </div>
+                    <div class="setting-item">
+                        <span class="label">最低启动电量 (%)</span>
+                        <el-input-number v-model="minBatteryLevel" :min="0" :max="100" size="small" />
+                    </div>
+                    <div v-if="isLowBattery" class="warning-text" style="color: #f56c6c; font-size: 12px; margin-top: 5px;">
+                        <el-icon><Warning /></el-icon> 当前电量过低 ({{ rosStore.robotStatus?.battery_soc }}%)，禁止启动
                     </div>
                 </div>
 
@@ -88,7 +112,7 @@
                     <div class="button-container">
                         <div style="width: 100%; display: flex; gap: 8px; margin-bottom: 8px;">
                             <el-button type="success" plain size="small" style="flex: 1"
-                                :disabled="!isNavigationRunning || !isConnected"
+                                :disabled="!isNavigationRunning || !isConnected || isLowBattery"
                                 @click="publishCommand('/goal_queue/start')">
                                 <el-icon style="margin-right: 4px">
                                     <VideoPlay />
@@ -236,29 +260,36 @@
                     <div class="control-group-label" style="margin-top: 12px;">
                         修改点位
                     </div>
-                    <el-button-group style="width: 100%; display: flex;">
-                        <el-button size="small" style="flex: 1" :disabled="!isNavigationRunning || !isConnected"
+                    <div class="button-grid">
+                        <el-button size="small" :disabled="!isNavigationRunning || !isConnected"
                             @click="handleModifyPoint">
                             <el-icon style="margin-right: 4px">
                                 <Edit />
                             </el-icon>
                             修改
                         </el-button>
-                        <el-button size="small" style="flex: 1" :disabled="!isNavigationRunning || !isConnected"
+                        <el-button size="small" :disabled="!isNavigationRunning || !isConnected"
                             @click="handleInsertPoint">
                             <el-icon style="margin-right: 4px">
                                 <Plus />
                             </el-icon>
                             插入
                         </el-button>
-                        <el-button size="small" type="danger" plain style="flex: 1"
+                        <el-button size="small" :disabled="!isNavigationRunning || !isConnected"
+                            @click="handleToggleRecord">
+                            <el-icon style="margin-right: 4px">
+                                <VideoCamera />
+                            </el-icon>
+                            录制
+                        </el-button>
+                        <el-button size="small" type="danger" plain
                             :disabled="!isNavigationRunning || !isConnected" @click="handleDeletePoint">
                             <el-icon style="margin-right: 4px">
                                 <Minus />
                             </el-icon>
                             删除
                         </el-button>
-                    </el-button-group>
+                    </div>
                 </div>
             </div>
         </el-scrollbar>
@@ -283,16 +314,94 @@
                 <el-button type="primary" @click="confirmScheduledStart">确定</el-button>
             </template>
         </el-dialog>
+
+        <!-- 录制状态设置对话框 -->
+        <el-dialog v-model="showRecordDialog" title="设置点位录制状态" width="400px">
+            <el-form label-width="100px">
+                <el-form-item label="点位索引">
+                    <el-input-number v-model="recordPointIndex" :min="1" placeholder="请输入点号" style="width: 100%" />
+                </el-form-item>
+                <el-form-item label="录制状态">
+                    <el-radio-group v-model="recordStatus">
+                        <el-radio :label="1">录制</el-radio>
+                        <el-radio :label="0">不录制</el-radio>
+                    </el-radio-group>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="showRecordDialog = false">取消</el-button>
+                <el-button type="primary" @click="confirmToggleRecord">确定</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 机器狗控制对话框 -->
+        <el-dialog v-model="showControlDialog" title="机器狗控制" width="340px" :close-on-click-modal="false">
+            <div class="control-panel">
+                <div class="control-group">
+                    <div class="control-label">运动控制</div>
+                    <div class="direction-pad">
+                        <div class="pad-row">
+                            <el-button class="pad-btn" :icon="DArrowLeft" 
+                                @mousedown="startMove('turn_left')" @mouseup="stopMove" @mouseleave="stopMove"
+                                @touchstart.prevent="startMove('turn_left')" @touchend.prevent="stopMove"
+                                title="左转" />
+                            <el-button class="pad-btn" type="primary" :icon="ArrowUp" 
+                                @mousedown="startMove('forward')" @mouseup="stopMove" @mouseleave="stopMove"
+                                @touchstart.prevent="startMove('forward')" @touchend.prevent="stopMove"
+                                title="前进" />
+                            <el-button class="pad-btn" :icon="DArrowRight" 
+                                @mousedown="startMove('turn_right')" @mouseup="stopMove" @mouseleave="stopMove"
+                                @touchstart.prevent="startMove('turn_right')" @touchend.prevent="stopMove"
+                                title="右转" />
+                        </div>
+                        <div class="pad-row">
+                            <el-button class="pad-btn" :icon="ArrowLeft" 
+                                @mousedown="startMove('left')" @mouseup="stopMove" @mouseleave="stopMove"
+                                @touchstart.prevent="startMove('left')" @touchend.prevent="stopMove"
+                                title="左移" />
+                            <el-button class="pad-btn stop-btn" type="danger" :icon="VideoPause" @click="stopMove" title="停止" />
+                            <el-button class="pad-btn" :icon="ArrowRight" 
+                                @mousedown="startMove('right')" @mouseup="stopMove" @mouseleave="stopMove"
+                                @touchstart.prevent="startMove('right')" @touchend.prevent="stopMove"
+                                title="右移" />
+                        </div>
+                        <div class="pad-row">
+                            <div class="pad-spacer"></div>
+                            <el-button class="pad-btn" :icon="ArrowDown" 
+                                @mousedown="startMove('backward')" @mouseup="stopMove" @mouseleave="stopMove"
+                                @touchstart.prevent="startMove('backward')" @touchend.prevent="stopMove"
+                                title="后退" />
+                            <div class="pad-spacer"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-label">姿态控制</div>
+                    <div class="action-buttons">
+                        <el-button type="success" style="flex: 1" @click="handleRobotAction('up')">
+                            <el-icon style="margin-right: 4px"><CaretTop /></el-icon>
+                            起立
+                        </el-button>
+                        <el-button type="warning" style="flex: 1" @click="handleRobotAction('down')">
+                            <el-icon style="margin-right: 4px"><CaretBottom /></el-icon>
+                            趴下
+                        </el-button>
+                    </div>
+                </div>
+            </div>
+        </el-dialog>
     </div>
 </template>
 
 <script setup lang="ts">
 import { ref, inject, type Ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { ElScrollbar, ElButton, ElButtonGroup, ElMessage, ElMessageBox, ElSelect, ElOption, ElIcon, ElTimePicker, ElDialog } from 'element-plus'
+import { ElScrollbar, ElButton, ElMessage, ElMessageBox, ElSelect, ElOption, ElIcon, ElTimePicker, ElDialog, ElForm, ElFormItem, ElInputNumber, ElRadioGroup, ElRadio } from 'element-plus'
 import {
     Operation,
     VideoPlay,
     VideoPause,
+    VideoCamera,
     Refresh,
     Delete,
     // DeleteFilled,
@@ -310,7 +419,17 @@ import {
     InfoFilled,
     Clock,
     Close,
-    Timer
+    Timer,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    CaretTop,
+    CaretBottom,
+    SwitchButton,
+    DArrowLeft,
+    DArrowRight,
+    Warning
 } from '@element-plus/icons-vue'
 import { rosConnection } from '@/services/rosConnection'
 import { use3DSettingsStore } from '@/stores/threeDSettings'
@@ -320,6 +439,20 @@ import type { PublishClickType } from '@/utils/PublishClickTool'
 const settingsStore = use3DSettingsStore()
 const rosStore = useRosStore()
 const queueName = ref('')
+
+// 电池安全设置
+const savedMinBattery = localStorage.getItem('minBatteryLevel')
+const minBatteryLevel = ref(savedMinBattery ? parseInt(savedMinBattery) : 20) // 默认20%
+
+watch(minBatteryLevel, (newVal) => {
+    localStorage.setItem('minBatteryLevel', newVal.toString())
+})
+
+const isLowBattery = computed(() => {
+    const currentLevel = rosStore.robotStatus?.battery_soc
+    if (currentLevel === undefined) return false
+    return currentLevel < minBatteryLevel.value
+})
 
 // 计算属性：检查是否已连接
 const isConnected = computed(() => rosStore.connectionState.connected)
@@ -348,25 +481,104 @@ const countdownInterval = ref<number | null>(null) // 倒计时更新定时器
 const showTimePickerDialog = ref(false) // 显示时间选择对话框
 const selectedTime = ref<string>('') // 选择的时间（HH:mm:ss格式）
 
+// 录制状态设置
+const showRecordDialog = ref(false)
+const recordPointIndex = ref<number | undefined>(undefined)
+const recordStatus = ref(1)
+
+// 机器狗控制
+const showControlDialog = ref(false)
+const moveInterval = ref<number | null>(null)
+
+const publishTwist = async (twist: any) => {
+    try {
+        await rosConnection.publish('/cmd_vel', 'geometry_msgs/Twist', twist)
+    } catch (error) {
+        console.error('Failed to publish movement command:', error)
+    }
+}
+
+const startMove = (direction: string) => {
+    if (!isConnected.value) return
+
+    // 清除可能存在的旧定时器
+    if (moveInterval.value) {
+        clearInterval(moveInterval.value)
+        moveInterval.value = null
+    }
+
+    const twist = {
+        linear: { x: 0, y: 0, z: 0 },
+        angular: { x: 0, y: 0, z: 0 }
+    }
+
+    const speed = 0.5
+    const turnSpeed = 1.0
+
+    switch (direction) {
+        case 'forward':
+            twist.linear.x = speed
+            break
+        case 'backward':
+            twist.linear.x = -speed
+            break
+        case 'left':
+            twist.linear.y = speed
+            break
+        case 'right':
+            twist.linear.y = -speed
+            break
+        case 'turn_left':
+            twist.angular.z = turnSpeed
+            break
+        case 'turn_right':
+            twist.angular.z = -turnSpeed
+            break
+    }
+
+    // 立即发送一次
+    publishTwist(twist)
+
+    // 以 2Hz (500ms) 频率持续发送
+    moveInterval.value = window.setInterval(() => {
+        publishTwist(twist)
+    }, 500)
+}
+
+const stopMove = () => {
+    if (moveInterval.value) {
+        clearInterval(moveInterval.value)
+        moveInterval.value = null
+    }
+    
+    // 发送停止指令
+    const stopTwist = {
+        linear: { x: 0, y: 0, z: 0 },
+        angular: { x: 0, y: 0, z: 0 }
+    }
+    publishTwist(stopTwist)
+}
+
+const handleRobotAction = async (action: string) => {
+    if (!isConnected.value) return
+
+    if (action === 'up' || action === 'down') {
+        try {
+            await rosConnection.publish('/upDown', 'std_msgs/String', { data: action })
+            ElMessage.success(`已发送${action === 'up' ? '起立' : '趴下'}指令`)
+        } catch (error) {
+            console.error('Failed to publish action command:', error)
+            ElMessage.error('发送指令失败')
+        }
+    }
+}
+
 // 获取3D面板的引用
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const threeDPanelRef = inject<Ref<any>>('threeDPanelRef', ref(null))
 
 // 处理发布命令
 const handlePublishCommand = (command: PublishClickType) => {
-    // 如果切换了模式，且不是因为修改/插入操作触发的，则重置修改/插入状态
-    if (!isModifying.value && !isInserting.value) {
-        // 正常切换模式
-    } else {
-        // 如果正在修改/插入，但用户点击了其他按钮（比如初始化位置），是否应该取消修改/插入？
-        // 这里我们假设用户点击按钮是想切换功能，所以取消修改/插入状态
-        // 但如果是代码内部调用（如 startModifyPoint），我们需要保留状态
-        // 由于无法区分来源，我们需要在 startModifyPoint 中设置状态后，立即调用此函数
-        // 所以这里不能简单重置。
-
-        // 修正逻辑：我们不在这里重置，而是在发布成功后重置
-    }
-
     publishType.value = command
     if (threeDPanelRef.value?.handlePublishCommand) {
         threeDPanelRef.value.handlePublishCommand(command)
@@ -390,6 +602,12 @@ const handlePublishCommand = (command: PublishClickType) => {
 const publishCommand = async (topic: string) => {
     if (!rosConnection.isConnected()) {
         ElMessage.warning('请先连接到机器狗')
+        return
+    }
+
+    // 检查电量
+    if (topic === '/goal_queue/start' && isLowBattery.value) {
+        ElMessage.error(`电量过低 (${rosStore.robotStatus?.battery_soc}%)，无法启动任务！请充电至 ${minBatteryLevel.value}% 以上。`)
         return
     }
 
@@ -431,7 +649,6 @@ const handleToggleNavigation = async () => {
         await rosConnection.publish('/trigger_launch', 'std_msgs/String', { data: command })
 
         // 注意：状态更新将通过订阅的状态话题来更新，这里不直接修改状态
-        // 但为了用户体验，可以立即更新UI（状态话题会最终确认）
         if (command === 'start') {
             ElMessage.success('正在启动导航系统...')
         } else {
@@ -530,35 +747,11 @@ const handleModifyPoint = async () => {
 
         if (value) {
             const index = parseInt(value) - 1
-            // 这里简化处理，只发送索引，实际可能需要更多交互来获取新的坐标
-            // 为了完整实现，我们可能需要先获取当前点的信息，或者让用户在地图上点击新位置
-            // 鉴于当前上下文，我们先提示用户在地图上点击新位置
 
             ElMessage.info(`请在地图上点击新的位置以修改点 #${value}`)
 
-            // 激活修改模式，这需要 ThreeDPanel 的支持
+            // 激活修改模式
             if (threeDPanelRef.value?.handlePublishCommand) {
-                // 我们需要一种方式传递 index 给 ThreeDPanel 或者 PublishClickTool
-                // 这里暂时使用一个临时方案：通过 store 或者全局变量，或者扩展 handlePublishCommand
-                // 简单起见，我们假设用户点击后，我们捕获点击事件并构造 JSON 发送
-
-                // 更好的方式是扩展 PublishClickTool 支持 'modify' 模式
-                // 但为了不修改太多文件，我们这里使用 'pose' 模式，但拦截发布逻辑
-
-                // 实际上，C++代码接收的是 JSON 字符串：
-                // {"index": idx, "x": ..., "y": ..., "z": ..., "qx": ..., ...}
-
-                // 让我们定义一个新的发布类型 'modify_point' 在前端逻辑中处理
-                // 但 PublishClickTool 需要知道这个类型
-
-                // 临时方案：提示用户该功能需要结合地图点击，目前仅支持通过命令发送
-                // 或者，我们可以弹出一个对话框让用户手动输入坐标（不太友好）
-
-                // 让我们尝试一种交互方式：
-                // 1. 用户输入索引
-                // 2. 激活地图点击
-                // 3. 点击后，发送修改命令
-
                 startModifyPoint(index)
             }
         }
@@ -628,6 +821,32 @@ const handleDeletePoint = async () => {
         }
     } catch (error) {
         // 用户取消
+    }
+}
+
+// 处理录制状态切换
+const handleToggleRecord = () => {
+    recordPointIndex.value = undefined
+    recordStatus.value = 1
+    showRecordDialog.value = true
+}
+
+const confirmToggleRecord = async () => {
+    if (recordPointIndex.value === undefined || recordPointIndex.value === null) {
+        ElMessage.warning('请输入点号')
+        return
+    }
+    
+    const index = recordPointIndex.value - 1 // 转换为0-based索引
+    const status = recordStatus.value
+    const message = `${index}_${status}`
+    
+    try {
+        await rosConnection.publish('/goal_queue/isRecord', 'std_msgs/String', { data: message })
+        ElMessage.success(`已设置点 #${recordPointIndex.value} 录制状态为 ${status === 1 ? '录制' : '不录制'}`)
+        showRecordDialog.value = false
+    } catch (error) {
+        ElMessage.error('设置失败')
     }
 }
 
@@ -854,7 +1073,6 @@ const formatScheduledTime = (date: Date | null): string => {
 }
 
 // 订阅任务状态（通过 /rosout 获取任务执行信息）
-// 注意：这个订阅会与 subscribeToQueueList 共享 /rosout 订阅
 // 实际状态更新在 subscribeToQueueList 的回调中处理
 const subscribeToTaskStatus = async () => {
     // 状态更新逻辑已合并到 subscribeToQueueList 中
@@ -1108,14 +1326,6 @@ const handlePosePublished = async (pose: any) => {
         }
     } else {
         // 正常发布
-        // 由于我们在 ThreeDPanel 中拦截了发布，这里需要手动发布
-        // 但 ThreeDPanel 的逻辑是：如果有回调，调用回调；否则发布。
-        // 所以这里不需要手动发布，除非我们想在这里处理所有发布逻辑。
-        // 但我们只想拦截修改/插入。
-
-        // 等等，如果我们在 ThreeDPanel 中设置了回调，那么 ThreeDPanel 就不会发布了。
-        // 所以我们需要在这里处理正常的发布逻辑。
-
         const frameId = 'map'
         // 构造 geometry_msgs/PoseStamped 消息
         // 对应 Python 文件: cb_add_pose 接收 msg.pose.position 和 msg.pose.orientation
@@ -1166,6 +1376,63 @@ const handlePosePublished = async (pose: any) => {
 
 .settings-content {
     padding: 12px;
+}
+
+.control-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 10px;
+}
+
+.control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.control-label {
+    font-size: 14px;
+    font-weight: bold;
+    color: #606266;
+    border-left: 3px solid #409eff;
+    padding-left: 8px;
+}
+
+.direction-pad {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    background-color: #f5f7fa;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.pad-row {
+    display: flex;
+    gap: 8px;
+}
+
+.pad-btn {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+    margin: 0 !important;
+}
+
+.pad-spacer {
+    width: 48px;
+    height: 48px;
+}
+
+.stop-btn {
+    font-size: 24px;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 10px;
 }
 
 .settings-section {

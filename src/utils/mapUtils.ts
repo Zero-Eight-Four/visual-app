@@ -4,6 +4,7 @@
  */
 
 import type { MapInfo, MapConfig } from '@/types/map'
+import { getAuthHeaders } from './auth'
 
 /**
  * 获取所有地图信息
@@ -12,7 +13,9 @@ import type { MapInfo, MapConfig } from '@/types/map'
 export async function fetchAllMaps(): Promise<MapInfo[]> {
   try {
     // 首先获取 maps 目录下的所有文件夹
-    const response = await fetch('/api/maps/list')
+    const response = await fetch('/api/maps/list', {
+      headers: getAuthHeaders()
+    })
 
     if (!response.ok) {
       // 如果 API 不存在，尝试直接访问 maps 目录
@@ -40,7 +43,9 @@ export async function fetchAllMaps(): Promise<MapInfo[]> {
  */
 async function fetchMapsFromDirectory(): Promise<MapInfo[]> {
   try {
-    const response = await fetch('/maps/')
+    const response = await fetch('/maps/', {
+      headers: getAuthHeaders()
+    })
     if (!response.ok) {
       return []
     }
@@ -80,6 +85,11 @@ async function fetchMapInfo(folderName: string): Promise<MapInfo | null> {
   try {
     // 读取配置文件
     const config = await fetchMapConfig(folderName)
+
+    // 如果标记为已删除，则跳过
+    if (config?.isDelete) {
+      return null
+    }
 
     // 查找 map 目录下的 pgm 文件
     const mapPath = await findPgmFile(folderName)
@@ -138,7 +148,9 @@ async function fetchMapConfig(folderName: string): Promise<MapConfig | null> {
   try {
     // 尝试读取 config.json
     const configUrl = `/maps/${encodeURIComponent(folderName)}/config.json`
-    const response = await fetch(configUrl)
+    const response = await fetch(configUrl, {
+      headers: getAuthHeaders()
+    })
 
     if (response.ok) {
       try {
@@ -156,7 +168,9 @@ async function fetchMapConfig(folderName: string): Promise<MapConfig | null> {
 
     // 如果 config.json 不存在，尝试读取 map.json
     const mapConfigUrl = `/maps/${encodeURIComponent(folderName)}/map.json`
-    const mapConfigResponse = await fetch(mapConfigUrl)
+    const mapConfigResponse = await fetch(mapConfigUrl, {
+      headers: getAuthHeaders()
+    })
 
     if (mapConfigResponse.ok) {
       try {
@@ -187,7 +201,9 @@ async function findPgmFile(folderName: string): Promise<string | null> {
   // 1. 尝试通过 API 获取 (JSON)
   try {
     const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
-    const response = await fetch(apiUrl)
+    const response = await fetch(apiUrl, {
+      headers: getAuthHeaders()
+    })
     if (response.ok) {
       const data = await response.json()
       if (data.success && data.files) {
@@ -204,7 +220,9 @@ async function findPgmFile(folderName: string): Promise<string | null> {
   // 2. 回退到静态目录抓取 (HTML)
   try {
     const mapDirUrl = `/maps/${encodeURIComponent(folderName)}/map/`
-    const response = await fetch(mapDirUrl)
+    const response = await fetch(mapDirUrl, {
+      headers: getAuthHeaders()
+    })
 
     if (!response.ok) {
       // 如果 map 目录不存在，尝试直接在文件夹根目录查找
@@ -236,7 +254,9 @@ async function findPgmFile(folderName: string): Promise<string | null> {
 async function findPgmInRoot(folderName: string): Promise<string | null> {
   try {
     const folderUrl = `/maps/${encodeURIComponent(folderName)}/`
-    const response = await fetch(folderUrl)
+    const response = await fetch(folderUrl, {
+      headers: getAuthHeaders()
+    })
 
     if (!response.ok) {
       return null
@@ -267,7 +287,9 @@ async function findPcdFile(folderName: string): Promise<string | undefined> {
   // 1. 尝试通过 API 获取 (JSON)
   try {
     const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
-    const response = await fetch(apiUrl)
+    const response = await fetch(apiUrl, {
+      headers: getAuthHeaders()
+    })
     if (response.ok) {
       const data = await response.json()
       if (data.success && data.files) {
@@ -284,7 +306,9 @@ async function findPcdFile(folderName: string): Promise<string | undefined> {
   // 2. 回退到静态目录抓取 (HTML)
   try {
     const mapDirUrl = `/maps/${encodeURIComponent(folderName)}/map/`
-    const response = await fetch(mapDirUrl)
+    const response = await fetch(mapDirUrl, {
+      headers: getAuthHeaders()
+    })
 
     if (!response.ok) {
       return undefined
@@ -315,7 +339,9 @@ async function findYamlFile(folderName: string): Promise<string | undefined> {
   // 1. 尝试通过 API 获取 (JSON)
   try {
     const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
-    const response = await fetch(apiUrl)
+    const response = await fetch(apiUrl, {
+      headers: getAuthHeaders()
+    })
     if (response.ok) {
       const data = await response.json()
       if (data.success && data.files) {
@@ -332,7 +358,9 @@ async function findYamlFile(folderName: string): Promise<string | undefined> {
   // 2. 回退到静态目录抓取 (HTML)
   try {
     const mapDirUrl = `/maps/${encodeURIComponent(folderName)}/map/`
-    const response = await fetch(mapDirUrl)
+    const response = await fetch(mapDirUrl, {
+      headers: getAuthHeaders()
+    })
 
     if (!response.ok) {
       return undefined
@@ -362,7 +390,9 @@ async function findYamlFile(folderName: string): Promise<string | undefined> {
 async function countQueueFiles(folderName: string): Promise<number> {
   try {
     const files = await getQueueFiles(folderName)
-    return files.length
+    // 过滤掉 text.json
+    const validFiles = files.filter(file => !file.endsWith('text.json'))
+    return validFiles.length
   } catch (error) {
     console.warn(`统计路线文件失败 (${folderName}):`, error)
     return 0
@@ -378,7 +408,10 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
     const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=queue`
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 10000)
-    const response = await fetch(apiUrl, { signal: controller.signal })
+    const response = await fetch(apiUrl, {
+      signal: controller.signal,
+      headers: getAuthHeaders()
+    })
     clearTimeout(timeoutId)
 
     if (response.ok) {
@@ -400,7 +433,8 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超时
     const response = await fetch(queueDirUrl, {
-      signal: controller.signal
+      signal: controller.signal,
+      headers: getAuthHeaders()
     })
     clearTimeout(timeoutId)
 
@@ -438,7 +472,10 @@ export async function getMapFiles(folderName: string): Promise<string[]> {
     const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 10000)
-    const response = await fetch(apiUrl, { signal: controller.signal })
+    const response = await fetch(apiUrl, {
+      signal: controller.signal,
+      headers: getAuthHeaders()
+    })
     clearTimeout(timeoutId)
 
     if (response.ok) {
@@ -463,7 +500,8 @@ export async function getMapFiles(folderName: string): Promise<string[]> {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超时
     const response = await fetch(mapDirUrl, {
-      signal: controller.signal
+      signal: controller.signal,
+      headers: getAuthHeaders()
     })
     clearTimeout(timeoutId)
 

@@ -315,6 +315,13 @@
                                 </el-icon>
                                 橡皮擦
                             </el-button>
+                            <el-button :type="currentTool === 'label' ? 'primary' : 'default'"
+                                @click="setTool('label')" title="添加标签">
+                                <el-icon>
+                                    <Location />
+                                </el-icon>
+                                标签
+                            </el-button>
                         </el-button-group>
                         <el-input-number v-model="brushSize" :min="1" :max="50" :step="1"
                             style="width: 100px; margin-left: 10px;" title="画笔大小" />
@@ -336,7 +343,7 @@
                     </div>
                 </div>
 
-                <div class="map-canvas-container" ref="canvasContainerRef" @mousemove="handleMouseMove"
+                <div class="map-canvas-container" @mousemove="handleMouseMove"
                     @mouseup="handleMouseUp" @mouseleave="handleMouseUp">
                     <div v-if="mapLoaded || editing" class="canvas-wrapper"
                         :style="{ transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }">
@@ -515,7 +522,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { ElButton, ElButtonGroup, ElDialog, ElIcon, ElMessage, ElMessageBox, ElInputNumber, ElRadioGroup, ElRadio, ElInput, ElAlert, ElProgress, ElDivider, ElForm, ElFormItem } from 'element-plus'
 import { Location, FolderOpened, Edit, Document, Check, Upload, Delete, ZoomIn, ZoomOut, Refresh, Warning, InfoFilled } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
@@ -584,12 +591,16 @@ const mapCanvasRef = ref<HTMLCanvasElement>()
 const editing = ref(false)
 const saving = ref(false)
 const mapLoaded = ref(false)
-const currentTool = ref<'brush' | 'rectangle' | 'eraser'>('brush')
+const currentTool = ref<'brush' | 'rectangle' | 'eraser' | 'label'>('brush')
 const brushSize = ref(5)
 const zoomLevel = ref(1.0)
 const saveMode = ref<'overwrite' | 'new'>('overwrite')
 // const saveFileName = ref<string>('')
 const saveMapNameForm = ref({ name: '', description: '' })
+
+// 标签相关
+const labels = ref<{ name: string; x: number; y: number }[]>([])
+const mapMeta = ref<{ resolution: number; origin: [number, number, number] } | null>(null)
 
 // 上传进度相关
 const showUploadProgress = ref(false)
@@ -619,10 +630,90 @@ const isPanning = ref(false)
 const panStartX = ref(0)
 const panStartY = ref(0)
 const panOffset = ref({ x: 0, y: 0 })
-const canvasContainerRef = ref<HTMLElement>()
 
 // 计算属性
 const isConnected = computed(() => rosStore.connectionState.connected)
+
+// 订阅 upLoad 话题，收到文件夹路径后触发从机器狗上传到服务器 image 目录
+let uploadTopicSubscribed = false
+
+const handleUploadTopicMessage = async (message: any) => {
+    const rawPath = typeof message?.data === 'string'
+        ? message.data.trim()
+        : (typeof message === 'string' ? message.trim() : '')
+
+    if (!rawPath) {
+        ElMessage.warning('收到 upLoad 话题但未提供文件夹路径')
+        return
+    }
+
+    // 将绝对路径转换为相对路径（基于机器狗文件服务根目录 /home/unitree/go2_nav/system）
+    const basePrefix = '/home/unitree/go2_nav/system/'
+    const relativePath = rawPath.startsWith(basePrefix)
+        ? rawPath.slice(basePrefix.length)
+        : rawPath.replace(/^\/+/, '')
+
+    const targetName = relativePath.split('/').filter(Boolean).pop() || 'downloaded'
+
+    const wsUrl = rosStore.connectionState.url
+    if (!wsUrl) {
+        ElMessage.error('未连接到机器狗，无法上传文件夹')
+        return
+    }
+
+    try {
+        const wsUrlObj = new URL(wsUrl)
+        const robotHttpUrl = `http://${wsUrlObj.hostname}:8080`
+
+        const response = await fetch('/api/images/download-from-robot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ robotUrl: robotHttpUrl, folderPath: relativePath, targetName })
+        })
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '')
+            throw new Error(errorText || response.statusText)
+        }
+
+        const result = await response.json().catch(() => ({}))
+        if (result && result.success === false) {
+            throw new Error(result.error || '从机器狗上传失败')
+        }
+
+        ElMessage.success(`已从机器狗上传文件夹: ${targetName}`)
+    } catch (error) {
+        console.error('处理 upLoad 话题失败:', error)
+        ElMessage.error(error instanceof Error ? error.message : '上传失败')
+    }
+}
+
+const subscribeUploadTopic = async () => {
+    if (uploadTopicSubscribed || !isConnected.value) return
+
+    try {
+        await rosConnection.subscribe({
+            topic: '/upLoad',
+            messageType: 'std_msgs/String',
+            callback: handleUploadTopicMessage
+        })
+        uploadTopicSubscribed = true
+    } catch (error) {
+        console.error('订阅 upLoad 话题失败:', error)
+        uploadTopicSubscribed = false
+    }
+}
+
+const unsubscribeUploadTopic = () => {
+    if (!uploadTopicSubscribed) return
+    try {
+        rosConnection.unsubscribe('/upLoad')
+    } catch (error) {
+        console.error('取消订阅 upLoad 话题失败:', error)
+    } finally {
+        uploadTopicSubscribed = false
+    }
+}
 
 // 获取可用地图列表
 const fetchAvailableMaps = async () => {
@@ -652,6 +743,15 @@ const handleRefreshMaps = async () => {
         refreshingMaps.value = false
     }
 }
+
+// 连接变化时管理 upLoad 订阅
+watch(isConnected, (connected) => {
+    if (connected) {
+        subscribeUploadTopic()
+    } else {
+        unsubscribeUploadTopic()
+    }
+}, { immediate: true })
 
 // 建图相关状态
 const showMappingConfirmDialog = ref(false)
@@ -984,8 +1084,12 @@ const validateFolderStructure = (files: File[]) => {
     const hasMapDir = filePaths.some(p => p.includes('/map/'))
     // 检查是否有 queue 目录
     const hasQueueDir = filePaths.some(p => p.includes('/queue/'))
-    // 检查 map 目录下是否有 pgm 文件
-    const hasPgmFile = filePaths.some(p => p.includes('/map/') && p.endsWith('.pgm'))
+    // 检查 map 目录下是否有地图文件
+    const requiredFiles = ['go2.pcd', 'go2.pgm', 'go2.yaml'];
+
+    const hasAllMapFiles = requiredFiles.every(ext => 
+        filePaths.some(p => p.includes('/map/') && p.endsWith(ext))
+    );
     // 检查是否有配置文件
     // const hasConfig = filePaths.some(p => p.endsWith('config.json') || p.endsWith('map.json'))
 
@@ -996,8 +1100,8 @@ const validateFolderStructure = (files: File[]) => {
     if (!hasQueueDir) {
         errors.push('缺少 queue 目录')
     }
-    if (!hasPgmFile) {
-        errors.push('map 目录下缺少 .pgm 文件')
+    if (!hasAllMapFiles) {
+        errors.push('map 目录下缺少地图文件')
     }
 
     if (errors.length > 0) {
@@ -1637,9 +1741,16 @@ const handleDeleteMap = async (map: MapInfo) => {
             }
         )
 
-        // 调用删除API
-        const response = await fetch(`/api/maps/delete?folderName=${encodeURIComponent(map.folderName)}`, {
-            method: 'DELETE'
+        // 调用更新配置API，标记为已删除
+        const response = await fetch('/api/maps/update-config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                folderName: map.folderName,
+                config: { isDelete: true }
+            })
         })
 
         if (!response.ok) {
@@ -1659,10 +1770,10 @@ const handleDeleteMap = async (map: MapInfo) => {
             // 如果删除的是当前使用的地图，清空当前地图
             if (currentMap.value?.folderName === map.folderName) {
                 currentMap.value = null
-                }
-            } else {
-            throw new Error(result.error || '删除失败')
             }
+        } else {
+            throw new Error(result.error || '删除失败')
+        }
         } catch (error) {
         if (error !== 'cancel') {
             const errorMessage = error instanceof Error ? error.message : String(error)
@@ -2270,6 +2381,62 @@ const loadMapForEdit = async (mapPath: string) => {
             throw new Error('解析地图文件失败，请检查文件格式是否正确')
         }
 
+        // 加载 YAML 文件以获取分辨率和原点
+        mapMeta.value = null
+        labels.value = []
+        if (selectedMapForEdit.value?.yamlPath) {
+            try {
+                // 构建 YAML 文件的 URL
+                // yamlPath 可能是 "folder/map/file.yaml" 或 "/maps/folder/map/file.yaml"
+                let yamlUrl = selectedMapForEdit.value.yamlPath
+                if (!yamlUrl.startsWith('/')) {
+                    yamlUrl = '/maps/' + yamlUrl
+                } else if (!yamlUrl.startsWith('/maps/')) {
+                    // 如果是以 / 开头但不是 /maps/，假设它是相对路径
+                    yamlUrl = '/maps' + yamlUrl
+                }
+                
+                const yamlRes = await fetch(yamlUrl)
+                if (yamlRes.ok) {
+                    const yamlText = await yamlRes.text()
+                    // 简单解析 YAML
+                    const resolutionMatch = yamlText.match(/resolution:\s*([\d.]+)/)
+                    const originMatch = yamlText.match(/origin:\s*\[([\d.-]+),\s*([\d.-]+),\s*([\d.-]+)\]/)
+                    
+                    if (resolutionMatch && originMatch) {
+                        mapMeta.value = {
+                            resolution: parseFloat(resolutionMatch[1]),
+                            origin: [
+                                parseFloat(originMatch[1]),
+                                parseFloat(originMatch[2]),
+                                parseFloat(originMatch[3])
+                            ]
+                        }
+                        console.log('地图元数据加载成功:', mapMeta.value)
+                    }
+                }
+            } catch (e) {
+                console.warn('加载 YAML 失败:', e)
+            }
+        }
+
+        // 尝试加载现有的 text.json
+        try {
+            // folderName 已经在 selectedMapForEdit 中
+            if (selectedMapForEdit.value) {
+                const textJsonUrl = `/maps/${selectedMapForEdit.value.folderName}/queue/text.json`
+                const textRes = await fetch(textJsonUrl)
+                if (textRes.ok) {
+                    const textData = await textRes.json()
+                    if (Array.isArray(textData)) {
+                        labels.value = textData
+                        console.log('加载现有标签:', labels.value)
+                    }
+                }
+            }
+        } catch (e) {
+            // 忽略错误，可能文件不存在
+        }
 
         // 等待DOM更新，确保画布元素已渲染
         await nextTick()
@@ -2318,6 +2485,15 @@ const loadMapForEdit = async (mapPath: string) => {
         }
 
         ctx.putImageData(imageData, 0, 0)
+        
+        // 保存原始图像数据，用于重绘
+        originalImageData = imageData
+        
+        // 绘制标签
+        if (labels.value.length > 0) {
+            redrawCanvas()
+        }
+
         mapLoaded.value = true
         // 重置拖动偏移量
         panOffset.value = { x: 0, y: 0 }
@@ -2377,7 +2553,7 @@ const loadMapForEdit = async (mapPath: string) => {
 // }
 
 // 设置工具
-const setTool = (tool: 'brush' | 'rectangle' | 'eraser') => {
+const setTool = (tool: 'brush' | 'rectangle' | 'eraser' | 'label') => {
     currentTool.value = tool
 }
 
@@ -2466,6 +2642,41 @@ const handleMouseDown = (event: MouseEvent) => {
 
     if (currentTool.value === 'rectangle') {
         isSelecting.value = true
+    } else if (currentTool.value === 'label') {
+        // 处理标签添加
+        if (!mapMeta.value) {
+            ElMessage.warning('无法获取地图元数据（分辨率和原点），无法添加标签')
+            return
+        }
+        
+        // 计算世界坐标
+        const resolution = mapMeta.value.resolution
+        const origin = mapMeta.value.origin
+        const height = mapCanvasRef.value.height
+        
+        // origin 对应的是图片的左下角
+        // PGM 图片坐标系 (0,0) 在左上角
+        // 所以计算 Y 轴时需要翻转：(height - 1 - y)
+        const worldX = origin[0] + (coords.x * resolution)
+        const worldY = origin[1] + ((height - 1 - coords.y) * resolution)
+        
+        ElMessageBox.prompt('请输入标签名称', '添加标签', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            inputPattern: /\S+/,
+            inputErrorMessage: '标签名称不能为空'
+        }).then(({ value }) => {
+            if (value) {
+                labels.value.push({
+                    name: value,
+                    x: Number(worldX.toFixed(3)),
+                    y: Number(worldY.toFixed(3))
+                })
+                redrawCanvas()
+                ElMessage.success(`已添加标签: ${value}`)
+            }
+        }).catch(() => {})
+        
     } else {
         drawAt(coords.x, coords.y)
     }
@@ -2649,6 +2860,39 @@ const redrawCanvas = () => {
     const ctx = mapCanvasRef.value.getContext('2d', { willReadFrequently: true })
     if (ctx) {
         ctx.putImageData(originalImageData, 0, 0)
+        
+        // 绘制标签
+        if (labels.value.length > 0 && mapMeta.value) {
+            const resolution = mapMeta.value.resolution
+            const origin = mapMeta.value.origin
+            const height = mapCanvasRef.value.height
+            
+            ctx.save()
+            ctx.font = 'bold 16px Arial'
+            ctx.fillStyle = '#F56C6C' // Element Plus Danger Color
+            ctx.strokeStyle = 'white'
+            ctx.lineWidth = 3
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'bottom'
+            
+            labels.value.forEach(label => {
+                // 世界坐标转像素坐标
+                const pixelX = (label.x - origin[0]) / resolution
+                const pixelY = height - 1 - (label.y - origin[1]) / resolution
+                
+                // 绘制点
+                ctx.beginPath()
+                ctx.arc(pixelX, pixelY, 4, 0, 2 * Math.PI)
+                ctx.fill()
+                ctx.stroke()
+                
+                // 绘制文字描边
+                ctx.strokeText(label.name, pixelX, pixelY - 8)
+                // 绘制文字
+                ctx.fillText(label.name, pixelX, pixelY - 8)
+            })
+            ctx.restore()
+        }
     }
 }
 
@@ -2797,6 +3041,14 @@ const saveMap = async () => {
         const formData = new FormData()
         formData.append('files', blob, fileName)
         formData.append('folderName', targetFolder)
+
+        // 保存标签文件 text.json
+        if (labels.value.length > 0) {
+            const textJsonContent = JSON.stringify(labels.value, null, 2)
+            const textBlob = new Blob([textJsonContent], { type: 'application/json' })
+            formData.append('files', textBlob, 'queue/text.json')
+        }
+
         // 覆盖模式下，mapName 必填，使用当前地图名称
         formData.append('mapName', selectedMapForEdit.value.displayName || 'Updated Map')
 
@@ -2870,6 +3122,10 @@ const saveMap = async () => {
                         const queueData = await queueRes.json()
                         if (queueData.success && queueData.files) {
                             queueData.files.forEach((f: any) => {
+                                // 如果我们要保存新的 text.json，则不复制旧的
+                                if (f.name === 'text.json' && labels.value.length > 0) {
+                                    return
+                                }
                                 filesToCopy.push({
                                     path: `${sourceFolder}/queue/${f.name}`,
                                     targetPath: `queue/${f.name}`
@@ -2897,6 +3153,13 @@ const saveMap = async () => {
                 // 使用原文件名（如果原文件名存在），否则使用默认名称
                 const newPgmName = originalPgmName || 'map.pgm'
                 formData.append('files', blob, `map/${newPgmName}`)
+
+                // 保存标签文件 text.json
+                if (labels.value.length > 0) {
+                    const textJsonContent = JSON.stringify(labels.value, null, 2)
+                    const textBlob = new Blob([textJsonContent], { type: 'application/json' })
+                    formData.append('files', textBlob, 'queue/text.json')
+                }
                 
                 formData.append('filesToCopy', JSON.stringify(filesToCopy))
 
@@ -3087,6 +3350,11 @@ const saveMap = async () => {
 // 组件挂载时获取地图列表
 onMounted(() => {
     fetchAvailableMaps()
+})
+
+// 组件卸载时清理订阅
+onUnmounted(() => {
+    unsubscribeUploadTopic()
 })
 </script>
 

@@ -517,11 +517,6 @@ const handleMarkersMessage = (message: any) => {
             })
 
             // 按ID排序，确保显示顺序正确
-            // 根据C++后端代码：对于队列中的第i个点（索引i，从0开始）
-            // - 箭头标记ID = i * 2（偶数：0, 2, 4, 6, ...）
-            // - 文本标记ID = i * 2 + 1（奇数：1, 3, 5, 7, ...）
-            // - 文本内容 = i + 1（从1开始的点号）
-            // 所以按ID排序即可保证正确的顺序
             validMarkers.sort((a: any, b: any) => {
                 // 优先按ID排序（这是主要排序依据）
                 if (a.id !== undefined && b.id !== undefined) {
@@ -539,8 +534,6 @@ const handleMarkersMessage = (message: any) => {
             })
 
             // 处理排序后的markers
-            // 根据C++后端代码，标记的ID和文本内容都是基于队列索引计算的
-            // 所以我们应该直接使用后端发送的文本内容，而不是自己计算
             validMarkers.forEach((marker: any) => {
                 // 调试：打印所有marker信息（特别是文本标记）
                 const markerObj = createMarker(marker)
@@ -751,17 +744,16 @@ const createTextMarker = (marker: any, pos: any, _orient: any): THREE.Object3D |
     const textColor = '#ff0000' // 红色
 
     // scale.z 是文字高度（米），转换为像素大小
-    // 假设1米 = 100像素来渲染文本
     // 增大默认文字高度和字体大小，使文字更清晰可见（放大2倍）
     const textHeightM = (marker.scale?.z || 0.2) * 2
     const fontSizePx = Math.max(192, textHeightM * 800) // 最小192像素，更大的字体（放大2倍）
 
-    // 创建文本精灵（面向相机的2D文本）
+    // 创建文本（面向相机的2D文本）
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d')!
 
     // 使用更大的画布以确保文本清晰（放大2倍）
-    canvas.width = 1024
+    canvas.width = 2048
     canvas.height = 512
 
     // 设置背景为透明

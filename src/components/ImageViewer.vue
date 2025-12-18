@@ -441,11 +441,23 @@ const confirmRenameVideo = async () => {
 }
 
 // 下载视频
-const handleDownloadVideo = (video: { name: string }) => {
-    const url = `/api/videos/download?fileName=${encodeURIComponent(video.name)}`
+const handleDownloadVideo = (video: { name: string; folder?: string }) => {
+    console.log('Download video:', video)
+    console.log('Current origin:', window.location.origin)
+
+    let path = `/api/videos/download?fileName=${encodeURIComponent(video.name)}`
+    if (video.folder) {
+        path += `&folder=${encodeURIComponent(video.folder)}`
+    }
+    
+    // Construct absolute URL using current origin to ensure protocol matches
+    const url = new URL(path, window.location.origin).href
+    console.log('Download URL:', url)
+
     const link = document.createElement('a')
     link.href = url
     link.download = video.name
+    link.target = '_blank' // Open in new tab to avoid mixed content issues
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)

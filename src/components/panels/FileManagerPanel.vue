@@ -86,7 +86,7 @@
         <!-- 上传对话框 -->
         <el-dialog v-model="showUploadDialog" title="上传文件" width="500px" :close-on-click-modal="false">
             <div class="upload-dialog-content">
-                <el-upload ref="uploadRef" :auto-upload="false" :on-change="handleFileChange" :limit="1"
+                <el-upload :auto-upload="false" :on-change="handleFileChange" :limit="1"
                     drag>
                     <el-icon class="el-icon--upload" :size="67">
                         <UploadFilled />
@@ -178,7 +178,6 @@ const newDirName = ref('')
 const moveDestinationPath = ref('')
 const moveOperation = ref<'move' | 'copy'>('move')
 const moveSourcePath = ref('')
-const uploadRef = ref()
 const httpClient = ref<HttpFileTransferClient | null>(null)
 
 // 计算属性
@@ -210,11 +209,23 @@ const navigateToBreadcrumb = async (index: number) => {
 const initHttpClient = async () => {
     const wsUrl = rosStore.connectionState.url
     if (wsUrl) {
-        httpClient.value = createHttpFileTransferClient(wsUrl, 8080)
+        // 根据 ROS 端口计算 HTTP 端口
+        // 规则：HTTP端口 = ROS端口 - 9090 + 8080
+        // 例如：9090 -> 8080, 9091 -> 8081
+        let httpPort = 8080
+        try {
+            const url = new URL(wsUrl)
+            const rosPort = parseInt(url.port) || 9090
+            httpPort = rosPort - 9090 + 8080
+        } catch (e) {
+            console.warn('Failed to parse ROS port, using default 8080', e)
+        }
+
+        httpClient.value = createHttpFileTransferClient(wsUrl, httpPort)
         // 测试连接
         const connected = await httpClient.value.checkConnection()
         if (!connected) {
-            ElMessage.warning('HTTP 文件服务未连接，请确保机器狗上已运行文件服务 API')
+            ElMessage.warning(`HTTP 文件服务未连接 (端口 ${httpPort})，请确保机器狗上已运行文件服务 API`)
         }
     }
 }

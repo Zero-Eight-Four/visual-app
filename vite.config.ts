@@ -9,6 +9,11 @@ import http from 'http'
 import https from 'https'
 import { Readable } from 'stream'
 
+const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url))
+const MAPS_DIR = join(ROOT_DIR, 'maps')
+const VIDEOS_DIR = join(ROOT_DIR, 'videos')
+const TEMP_DIR = join(ROOT_DIR, 'temp')
+
 // 优化的流式处理：使用固定大小缓冲区，避免内存溢出
 // 对于大文件，使用流式写入临时文件，然后移动到目标位置
 async function processMultipartStream(
@@ -36,7 +41,7 @@ async function processMultipartStream(
     }
 
     // 使用临时文件进行流式处理，避免将整个文件加载到内存
-    const tempDir = join('/home/zeroef/visual-app', 'temp')
+    const tempDir = TEMP_DIR
     const tempFilePath = join(tempDir, `upload_${Date.now()}_${Math.random().toString(36).substring(7)}`)
 
     // 确保临时目录存在
@@ -280,7 +285,7 @@ export default defineConfig({
           }
 
           await processMultipartStream(req, res, async (fields, files) => {
-            const mapsDir = join('/home/zeroef/visual-app', 'maps')
+            const mapsDir = MAPS_DIR
             let fileName = ''
             let fileData: Buffer | null = null
             let folderName = fields.folderName || ''
@@ -328,7 +333,7 @@ export default defineConfig({
         // API: 列出 maps 目录下的所有文件夹
         server.middlewares.use('/api/maps/list', async (req, res) => {
           try {
-            const mapsDir = join('/home/zeroef/visual-app', 'maps')
+            const mapsDir = MAPS_DIR
             const entries = await readdir(mapsDir, { withFileTypes: true })
             const folders = entries
               .filter((entry) => entry.isDirectory())
@@ -357,7 +362,7 @@ export default defineConfig({
               return
             }
 
-            const mapsDir = join('/home/zeroef/visual-app', 'maps')
+            const mapsDir = MAPS_DIR
             // Prevent directory traversal
             if (folderName.includes('..') || subDir.includes('..')) {
               res.statusCode = 403
@@ -412,7 +417,7 @@ export default defineConfig({
               return
             }
 
-            const mapsDir = join('/home/zeroef/visual-app', 'maps')
+            const mapsDir = MAPS_DIR
             const targetDir = join(mapsDir, decodeURIComponent(folderName))
 
             // 检查目录是否存在
@@ -447,7 +452,7 @@ export default defineConfig({
           }
 
           await processMultipartStream(req, res, async (fields, files) => {
-            const mapsDir = join('/home/zeroef/visual-app', 'maps')
+            const mapsDir = MAPS_DIR
             const folderName = fields.folderName || ''
             const mapName = fields.mapName || ''
             const description = fields.description || ''
@@ -497,7 +502,7 @@ export default defineConfig({
           }
 
           await processMultipartStream(req, res, async (fields, files) => {
-            const mapsDir = join('/home/zeroef/visual-app', 'maps')
+            const mapsDir = MAPS_DIR
             const folderName = fields.folderName || ''
             const mapName = fields.mapName || ''
             const description = fields.description || ''
@@ -571,7 +576,7 @@ export default defineConfig({
             return
           }
 
-          const videosDir = join('/home/zeroef/visual-app', 'videos')
+          const videosDir = VIDEOS_DIR
           await mkdir(videosDir, { recursive: true })
 
           await processMultipartStream(req, res, async (fields, files) => {
@@ -616,7 +621,7 @@ export default defineConfig({
         // API: 列出所有视频（按日期文件夹组织）
         server.middlewares.use('/api/videos/list', async (req, res) => {
           try {
-            const videosDir = join('/home/zeroef/visual-app', 'videos')
+            const videosDir = VIDEOS_DIR
             await mkdir(videosDir, { recursive: true })
 
             const entries = await readdir(videosDir, { withFileTypes: true })
@@ -670,7 +675,7 @@ export default defineConfig({
         // API: 下载视频
         server.middlewares.use('/api/videos/download', async (req, res) => {
           try {
-            const videosDir = join('/home/zeroef/visual-app', 'videos')
+            const videosDir = VIDEOS_DIR
             const url = new URL(req.url || '', `http://${req.headers.host}`)
             const fileName = url.searchParams.get('fileName') || ''
             const folder = url.searchParams.get('folder') || ''
@@ -748,7 +753,7 @@ export default defineConfig({
           }
 
           try {
-            const videosDir = join('/home/zeroef/visual-app', 'videos')
+            const videosDir = VIDEOS_DIR
             const chunks: Buffer[] = []
 
             req.on('data', (chunk: Buffer) => {
@@ -869,7 +874,7 @@ export default defineConfig({
           }
 
           try {
-            const videosDir = join('/home/zeroef/visual-app', 'videos')
+            const videosDir = VIDEOS_DIR
             const chunks: Buffer[] = []
 
             req.on('data', (chunk: Buffer) => {
@@ -1025,7 +1030,7 @@ export default defineConfig({
                     return
                   }
 
-                  const mapsDir = join('/home/zeroef/visual-app', 'maps')
+                  const mapsDir = MAPS_DIR
                   const targetFolderPath = join(mapsDir, folderName)
 
                   // 创建目标文件夹
@@ -1358,7 +1363,7 @@ export default defineConfig({
                   return
                 }
 
-                const mapsDir = join('/home/zeroef/visual-app', 'maps')
+                const mapsDir = MAPS_DIR
                 const results: Array<{ file: string; success: boolean; error?: string; size?: number }> = []
 
                 // 1. 先计算所有文件的总大小
@@ -1766,7 +1771,7 @@ export default defineConfig({
         // 处理 maps 目录的文件服务（支持文件夹结构）
         server.middlewares.use('/maps', async (req, res) => {
           try {
-            const mapsDir = join('/home/zeroef/visual-app', 'maps')
+            const mapsDir = MAPS_DIR
             const urlPath = req.url || '/'
 
             // 如果是根路径，返回目录列表（列出所有文件夹）
@@ -1902,7 +1907,8 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      'roslib': join(ROOT_DIR, 'node_modules/roslib/build/roslib.js')
     }
   },
   server: {

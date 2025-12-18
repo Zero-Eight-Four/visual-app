@@ -16,7 +16,22 @@ async function loadRoslib(retries = 3): Promise<any> {
   for (let i = 0; i < retries; i++) {
     try {
       // @ts-ignore
-      ROSLIB = await import('roslib')
+      const module = await import('roslib')
+      // 处理 ES Module 和 CommonJS 的兼容性
+      // 优先使用 default 导出，如果它包含 Ros 类
+      let lib = module.default || module
+
+      // 再次检查，确保我们拿到了正确的对象
+      if (!lib.Ros && module.Ros) {
+        lib = module
+      }
+
+      // 如果还是没有，尝试从全局对象获取 (作为最后的备选)
+      if (!lib.Ros && (window as any).ROSLIB) {
+        lib = (window as any).ROSLIB
+      }
+
+      ROSLIB = lib
       return ROSLIB
     } catch (error) {
       const isLastAttempt = i === retries - 1
@@ -54,6 +69,12 @@ class RosConnection {
    */
   async connect(config: ConnectionConfig): Promise<void> {
     const lib = await loadRoslib()
+    const Ros = lib.Ros || lib.default?.Ros
+
+    if (!Ros) {
+      throw new Error('无法加载 Ros 类: roslib 模块加载失败')
+    }
+
     this.intentionalDisconnect = false
 
     return new Promise((resolve, reject) => {
@@ -66,7 +87,7 @@ class RosConnection {
         reject(new Error('连接超时：无法在15秒内连接到服务器，请检查网络和服务器状态'))
       }, 15000)
 
-      this.ros = new lib.Ros({
+      this.ros = new Ros({
         url: config.url
       })
 
@@ -85,10 +106,10 @@ class RosConnection {
         this.stopHeartbeat()
         console.error('ROS connection error:', error)
         this.notifyConnectionChange(false)
-        
+
         // WebSocket 错误事件返回的是 Event 对象，需要提取详细信息
         let errorMessage = 'WebSocket 连接失败：无法连接到服务器'
-        
+
         if (error instanceof Error) {
           errorMessage = error.message
         } else if (error && typeof error === 'object') {
@@ -102,7 +123,7 @@ class RosConnection {
               errorMessage = `WebSocket 连接失败：连接状态异常 (readyState: ${ws.readyState})`
             }
           }
-          
+
           // 检查是否有URL信息
           if (ws && ws.url) {
             const url = new URL(ws.url)
@@ -115,13 +136,18 @@ class RosConnection {
             errorMessage += `\n5. 服务器地址错误`
           }
         }
-        
+
         reject(new Error(errorMessage))
       })
 
       this.ros.on('close', () => {
         clearTimeout(timeout)
         this.stopHeartbeat()
+
+        // Clear publishers and subscribers as they are bound to the closed connection
+        this.subscribers.clear()
+        this.publishers.clear()
+
         this.notifyConnectionChange(false)
         if (!this.intentionalDisconnect) {
           this.notifyDisconnect()

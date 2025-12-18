@@ -1,3 +1,5 @@
+import { getAuthHeaders } from './auth'
+
 /**
  * 基于 HTTP API 的文件传输工具
  * 不依赖 rosbridge，直接通过 HTTP 请求进行文件传输
@@ -67,6 +69,10 @@ export class HttpFileTransferClient {
     try {
       const response = await fetch(url, {
         ...options,
+        headers: {
+          ...options.headers,
+          ...getAuthHeaders()
+        },
         signal: controller.signal
       })
 
@@ -147,8 +153,6 @@ export class HttpFileTransferClient {
             }
           } else {
             // 如果无法计算总大小，使用已加载的字节数来估算进度
-            // 假设文件大小至少是已加载字节数的 1.1 倍（保守估计）
-            // 这样可以显示进度，即使无法准确计算
             if (e.loaded > 0) {
               // 使用一个保守的估算：假设已加载了至少 1% 的进度
               // 实际进度会在文件上传完成时设置为 100%
@@ -208,6 +212,13 @@ export class HttpFileTransferClient {
 
       console.log(`[uploadFile] 发送请求: POST ${url}`)
       xhr.open('POST', url)
+
+      // 添加 Authorization header
+      const authHeaders = getAuthHeaders() as Record<string, string>
+      if (authHeaders.Authorization) {
+        xhr.setRequestHeader('Authorization', authHeaders.Authorization)
+      }
+
       xhr.send(formData)
     })
   }
@@ -234,7 +245,8 @@ export class HttpFileTransferClient {
           // 使用 reload 模式避免缓存，但不添加自定义请求头
           cache: 'reload',
           // 明确指定 method，避免某些浏览器添加额外的请求头
-          method: 'GET'
+          method: 'GET',
+          headers: getAuthHeaders()
         })
 
         clearTimeout(timeout)

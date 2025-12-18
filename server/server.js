@@ -6,6 +6,8 @@ import { readdir, writeFile, mkdir, rm, readFile, rename, copyFile, stat, access
 import { createReadStream, createWriteStream, statSync, constants } from 'fs';
 import http from 'http';
 import https from 'https';
+import { getRocketMQBridge } from './rocketmqBridge.js';
+import { ScheduleManager } from './scheduleManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -13,6 +15,7 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
 const TARGET_API = 'http://8.148.247.53:8000';
+const mqBridgePromise = getRocketMQBridge();
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -20,8 +23,10 @@ app.use((req, res, next) => {
     next();
 });
 
+app.use(express.json());
+
 // Serve static files for maps
-app.use('/maps', express.static(join(__dirname, 'maps')));
+app.use('/maps', express.static(join(__dirname, '../maps')));
 
 // 优化的流式处理：使用固定大小缓冲区，避免内存溢出
 async function processMultipartStream(req, res, processor) {
@@ -40,7 +45,7 @@ async function processMultipartStream(req, res, processor) {
             return;
         }
 
-        const tempDir = join(__dirname, 'temp');
+        const tempDir = join(__dirname, '../temp');
         const tempFilePath = join(tempDir, `upload_${Date.now()}_${Math.random().toString(36).substring(7)}`);
 
         mkdir(tempDir, { recursive: true }).catch(() => { });
@@ -194,14 +199,14 @@ async function processMultipartStream(req, res, processor) {
 app.use(express.json());
 
 // Serve static files
-app.use(express.static(join(__dirname, 'dist')));
+app.use(express.static(join(__dirname, '../dist')));
 
 // Maps Directory Listing
 app.use('/maps', async (req, res, next) => {
     if (req.path.startsWith('/api')) return next(); // Skip API routes
 
     try {
-        const mapsDir = join(__dirname, 'maps');
+        const mapsDir = join(__dirname, '../maps');
         const urlPath = req.path === '/' ? '' : req.path;
 
         if (urlPath === '' || urlPath === '/') {
@@ -239,7 +244,7 @@ app.use('/maps', (req, res) => {
 // API Routes
 app.post('/api/maps/upload', async (req, res) => {
     await processMultipartStream(req, res, async (fields, files) => {
-        const mapsDir = join(__dirname, 'maps');
+        const mapsDir = join(__dirname, '../maps');
         let fileName = '', fileData = null, folderName = fields.folderName || '';
         for (const file of files) {
             if (file.fieldName === 'file') {
@@ -267,7 +272,7 @@ app.post('/api/maps/upload', async (req, res) => {
 
 app.get('/api/maps/list', async (req, res) => {
     try {
-        const mapsDir = join(__dirname, 'maps');
+        const mapsDir = join(__dirname, '../maps');
         const entries = await readdir(mapsDir, { withFileTypes: true });
         const folders = entries.filter(e => e.isDirectory()).map(e => e.name);
         res.json({ success: true, folders });
@@ -282,7 +287,7 @@ app.get('/api/maps/files', async (req, res) => {
         const subDir = req.query.subDir || '';
         if (!folderName) return res.status(400).json({ success: false, error: 'Missing folder parameter' });
 
-        const targetDir = join(__dirname, 'maps', folderName, subDir);
+        const targetDir = join(__dirname, '../maps', folderName, subDir);
         try {
             const entries = await readdir(targetDir, { withFileTypes: true });
             const files = entries.filter(e => e.isFile()).map(e => ({
@@ -298,11 +303,37 @@ app.get('/api/maps/files', async (req, res) => {
     }
 });
 
+app.post('/api/maps/update-config', async (req, res) => {
+    try {
+        const { folderName, config } = req.body;
+        if (!folderName || !config) return res.status(400).json({ success: false, error: 'Missing required fields' });
+
+        const mapsDir = join(__dirname, '../maps');
+        const mapFolderPath = join(mapsDir, folderName);
+        const configPath = join(mapFolderPath, 'config.json');
+
+        // Read existing config to merge
+        let existingConfig = {};
+        try {
+            const data = await readFile(configPath, 'utf-8');
+            existingConfig = JSON.parse(data);
+        } catch (e) {
+            // Ignore if file doesn't exist
+        }
+
+        const newConfig = { ...existingConfig, ...config };
+        await writeFile(configPath, JSON.stringify(newConfig, null, 2));
+        res.json({ success: true, config: newConfig });
+    } catch (error) {
+        res.status(500).json({ success: false, error: String(error) });
+    }
+});
+
 app.delete('/api/maps/delete', async (req, res) => {
     try {
         const folderName = req.query.folderName;
         if (!folderName || folderName.includes('..')) return res.status(400).json({ success: false, error: 'Invalid folder name' });
-        const targetDir = join(__dirname, 'maps', folderName);
+        const targetDir = join(__dirname, '../maps', folderName);
         await rm(targetDir, { recursive: true, force: true });
         res.json({ success: true, message: 'Map folder deleted successfully' });
     } catch (error) {
@@ -312,7 +343,7 @@ app.delete('/api/maps/delete', async (req, res) => {
 
 app.post('/api/maps/upload-folder', async (req, res) => {
     await processMultipartStream(req, res, async (fields, files) => {
-        const mapsDir = join(__dirname, 'maps');
+        const mapsDir = join(__dirname, '../maps');
         const folderName = fields.folderName || '';
         const mapName = fields.mapName || '';
         const description = fields.description || '';
@@ -336,7 +367,7 @@ app.post('/api/maps/upload-folder', async (req, res) => {
 
 app.post('/api/maps/save', async (req, res) => {
     await processMultipartStream(req, res, async (fields, files) => {
-        const mapsDir = join(__dirname, 'maps');
+        const mapsDir = join(__dirname, '../maps');
         const folderName = fields.folderName || '';
         const mapName = fields.mapName || '';
         const description = fields.description || '';
@@ -389,7 +420,7 @@ app.post('/api/maps/save', async (req, res) => {
 
 app.post('/api/maps/save-new-map', async (req, res) => {
     await processMultipartStream(req, res, async (fields, files) => {
-        const mapsDir = join(__dirname, 'maps');
+        const mapsDir = join(__dirname, '../maps');
         const folderName = fields.folderName || '';
         const mapName = fields.mapName || '';
         const description = fields.description || '';
@@ -427,7 +458,7 @@ app.post('/api/maps/save-new-map', async (req, res) => {
 
 app.post('/api/videos/upload', async (req, res) => {
     await processMultipartStream(req, res, async (fields, files) => {
-        const videosDir = join(__dirname, 'videos');
+        const videosDir = join(__dirname, '../videos');
         let fileName = '', fileData = null;
         for (const file of files) {
             if (file.fieldName === 'video') {
@@ -452,7 +483,7 @@ app.post('/api/videos/upload', async (req, res) => {
 
 app.get('/api/videos/list', async (req, res) => {
     try {
-        const videosDir = join(__dirname, 'videos');
+        const videosDir = join(__dirname, '../videos');
         await mkdir(videosDir, { recursive: true });
         const entries = await readdir(videosDir, { withFileTypes: true });
         const dates = [];
@@ -496,7 +527,7 @@ app.delete('/api/videos/delete', async (req, res) => {
         if (!fileName || fileName.includes('..')) return res.status(400).json({ success: false, error: 'Invalid file name' });
         if (folder && (folder.includes('..') || !/^\d{8}$/.test(folder))) return res.status(400).json({ success: false, error: 'Invalid folder' });
 
-        const videosDir = join(__dirname, 'videos');
+        const videosDir = join(__dirname, '../videos');
         const filePath = folder ? join(videosDir, folder, fileName) : join(videosDir, fileName);
         await rm(filePath);
         res.json({ success: true, message: 'Video deleted' });
@@ -505,12 +536,48 @@ app.delete('/api/videos/delete', async (req, res) => {
     }
 });
 
+app.get('/api/videos/download', async (req, res) => {
+    try {
+        const videosDir = join(__dirname, '../videos');
+        const fileName = req.query.fileName;
+        const folder = req.query.folder;
+
+        if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
+            return res.status(400).json({ success: false, error: 'Invalid file name' });
+        }
+
+        if (folder && (folder.includes('..') || folder.includes('/') || folder.includes('\\') || !/^\d{8}$/.test(folder))) {
+            return res.status(400).json({ success: false, error: 'Invalid folder name' });
+        }
+
+        const filePath = folder ? join(videosDir, folder, decodeURIComponent(fileName)) : join(videosDir, decodeURIComponent(fileName));
+
+        try {
+            const stats = statSync(filePath);
+            if (!stats.isFile()) {
+                return res.status(404).json({ success: false, error: 'File not found' });
+            }
+
+            res.setHeader('Content-Type', 'video/webm');
+            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+            res.setHeader('Content-Length', stats.size);
+
+            const readStream = createReadStream(filePath);
+            readStream.pipe(res);
+        } catch (error) {
+            res.status(404).json({ success: false, error: 'File not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: String(error) });
+    }
+});
+
 app.post('/api/videos/rename', async (req, res) => {
     try {
         const { oldName, newName, folder } = req.body;
         if (!oldName || !newName || oldName.includes('..') || newName.includes('..')) return res.status(400).json({ success: false, error: 'Invalid names' });
 
-        const videosDir = join(__dirname, 'videos');
+        const videosDir = join(__dirname, '../videos');
         const safeNewName = newName.replace(/[^a-zA-Z0-9._-]/g, '_');
         if (!safeNewName.endsWith('.webm')) return res.status(400).json({ success: false, error: 'Must end with .webm' });
 
@@ -612,7 +679,7 @@ app.post('/api/maps/download-from-robot', async (req, res) => {
             return;
         }
 
-        const mapsDir = join(__dirname, 'maps');
+        const mapsDir = join(__dirname, '../maps');
         const targetFolderPath = join(mapsDir, targetFolderName);
         await mkdir(targetFolderPath, { recursive: true });
 
@@ -810,7 +877,7 @@ app.post('/api/maps/download-from-robot', async (req, res) => {
         console.error('Download error:', error);
         if (mapNameForCleanup) {
             try {
-                const mapsDir = join(__dirname, 'maps');
+                const mapsDir = join(__dirname, '../maps');
                 await rm(join(mapsDir, mapNameForCleanup), { recursive: true, force: true });
             } catch (e) { console.error('Cleanup error:', e); }
         }
@@ -822,6 +889,232 @@ app.post('/api/maps/download-from-robot', async (req, res) => {
         }
     }
 });
+
+// 通用：从机器狗指定文件夹下载到服务器 image 目录
+app.post('/api/images/download-from-robot', async (req, res) => {
+    try {
+        // 兼容未启用 express.json 的情况
+        let requestData = req.body
+        if (!requestData || !requestData.robotUrl) {
+            let body = ''
+            await new Promise((resolve, reject) => {
+                req.on('data', (chunk) => { body += chunk.toString() })
+                req.on('end', () => resolve())
+                req.on('error', reject)
+            })
+            if (body) {
+                requestData = JSON.parse(body)
+            }
+        }
+
+        const { robotUrl, folderPath, targetName } = requestData || {}
+        if (!robotUrl || !folderPath) {
+            res.status(400).json({ success: false, error: 'robotUrl 和 folderPath 不能为空' })
+            return
+        }
+
+        const normalizedRemote = folderPath.replace(/^\/+/, '')
+
+        // 本地保存目录名：优先使用传入的 targetName，否则使用远端路径的最后一段
+        const safeTargetName = (targetName || basename(normalizedRemote) || 'downloaded')
+            .replace(/[^a-zA-Z0-9._-]/g, '_')
+
+        const imageRoot = join(__dirname, '../image')
+        const targetFolder = join(imageRoot, safeTargetName)
+
+        // 路径安全检查，避免路径穿越
+        if (!targetFolder.startsWith(imageRoot)) {
+            res.status(400).json({ success: false, error: '非法的文件夹路径' })
+            return
+        }
+
+        await mkdir(targetFolder, { recursive: true })
+
+        const robot = new URL(robotUrl)
+        const protocolModule = robot.protocol === 'https:' ? https : http
+        const robotHost = robot.hostname
+        const robotPort = parseInt(robot.port || '8080', 10)
+        const apiPrefix = '/api/files'
+
+        // 健康检查
+        const healthOk = await new Promise((resolve) => {
+            const healthReq = protocolModule.get({
+                hostname: robotHost,
+                port: robotPort,
+                path: `${apiPrefix}/health`,
+                timeout: 5000
+            }, (healthRes) => {
+                let data = ''
+                healthRes.on('data', (chunk) => { data += chunk.toString() })
+                healthRes.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(data || '{}')
+                        resolve(parsed.success === true)
+                    } catch {
+                        resolve(false)
+                    }
+                })
+            })
+            healthReq.on('error', () => resolve(false))
+            healthReq.on('timeout', () => { healthReq.destroy(); resolve(false) })
+        })
+
+        if (!healthOk) {
+            res.status(500).json({ success: false, error: '无法连接到机器狗文件服务' })
+            return
+        }
+
+        const requestJson = (path) => new Promise((resolve, reject) => {
+            const reqOptions = {
+                hostname: robotHost,
+                port: robotPort,
+                path,
+                timeout: 15000
+            }
+            const jsonReq = protocolModule.get(reqOptions, (jsonRes) => {
+                let data = ''
+                jsonRes.on('data', (chunk) => { data += chunk.toString() })
+                jsonRes.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(data || '{}')
+                        resolve(parsed)
+                    } catch (error) {
+                        reject(new Error(`解析响应失败: ${String(error)}`))
+                    }
+                })
+            })
+            jsonReq.on('error', (err) => reject(err))
+            jsonReq.on('timeout', () => { jsonReq.destroy(); reject(new Error('请求超时')) })
+        })
+
+        const downloadFile = (remotePath, localPath) => new Promise((resolve, reject) => {
+            const downloadReq = protocolModule.get({
+                hostname: robotHost,
+                port: robotPort,
+                path: `${apiPrefix}/download?path=${encodeURIComponent(remotePath)}&_t=${Date.now()}`,
+                timeout: 10 * 60 * 1000
+            }, (downloadRes) => {
+                if (downloadRes.statusCode !== 200 && downloadRes.statusCode !== 206) {
+                    reject(new Error(`HTTP ${downloadRes.statusCode}`))
+                    return
+                }
+
+                const writeStream = createWriteStream(localPath)
+                downloadRes.pipe(writeStream)
+
+                downloadRes.on('error', reject)
+                writeStream.on('error', reject)
+                writeStream.on('finish', () => resolve())
+            })
+
+            downloadReq.on('error', reject)
+            downloadReq.on('timeout', () => { downloadReq.destroy(); reject(new Error('下载超时')) })
+        })
+
+        const walkFolder = async (remotePath, localBase) => {
+            const listResult = await requestJson(`${apiPrefix}/list?path=${encodeURIComponent(remotePath)}`)
+            const items = listResult?.items || []
+
+            for (const item of items) {
+                const remoteChild = `${remotePath}/${item.name}`
+                const localChild = join(localBase, item.name)
+
+                if (item.type === 'directory') {
+                    await mkdir(localChild, { recursive: true })
+                    await walkFolder(remoteChild, localChild)
+                } else {
+                    await mkdir(dirname(localChild), { recursive: true })
+                    await downloadFile(remoteChild, localChild)
+                }
+            }
+        }
+
+        await walkFolder(normalizedRemote, targetFolder)
+
+        res.json({ success: true, target: targetFolder })
+    } catch (error) {
+        console.error('下载文件夹失败:', error)
+        res.status(500).json({ success: false, error: String(error) })
+    }
+})
+
+// RocketMQ: publish message
+app.post('/api/mq/publish', async (req, res) => {
+    try {
+        const mq = await mqBridgePromise
+        if (!mq?.enabled) {
+            res.status(503).json({ success: false, error: 'RocketMQ 未启用或客户端不可用' });
+            return;
+        }
+
+        let body = req.body
+        if (!body || body.message === undefined) {
+            let raw = ''
+            await new Promise((resolve, reject) => {
+                req.on('data', chunk => { raw += chunk.toString(); })
+                req.on('end', resolve)
+                req.on('error', reject)
+            })
+            if (raw) {
+                try {
+                    body = JSON.parse(raw)
+                } catch {
+                    body = { message: raw }
+                }
+            }
+        }
+
+        const { message, topic } = body || {}
+        if (message === undefined || message === null) {
+            res.status(400).json({ success: false, error: 'message 不能为空' });
+            return;
+        }
+
+        const result = await mq.sendMessage(message, topic)
+        res.json({ success: true, ...result })
+    } catch (error) {
+        console.error('MQ publish error:', error)
+        res.status(500).json({ success: false, error: String(error) })
+    }
+})
+
+// RocketMQ: SSE stream for consumer messages
+const mqSseClients = new Set();
+
+app.get('/api/mq/stream', async (req, res) => {
+    try {
+        const mq = await mqBridgePromise
+        if (!mq?.enabled) {
+            res.status(503).json({ success: false, error: 'RocketMQ 未启用或客户端不可用' });
+            return;
+        }
+
+        // Start consumer loop once
+        await mq.ensureConsumer()
+
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive'
+        })
+        res.write(': connected\n\n')
+
+        const push = (msg) => {
+            res.write(`data: ${JSON.stringify(msg)}\n\n`)
+        }
+
+        mqSseClients.add(push)
+        const unsubscribe = mq.addListener(push)
+
+        req.on('close', () => {
+            mqSseClients.delete(push)
+            unsubscribe()
+        })
+    } catch (error) {
+        console.error('MQ stream error:', error)
+        res.status(500).end()
+    }
+})
 
 app.post('/api/maps/send-to-robot', async (req, res) => {
     try {
@@ -895,7 +1188,7 @@ app.post('/api/maps/send-to-robot', async (req, res) => {
             return;
         }
 
-        const mapsDir = join(__dirname, 'maps');
+        const mapsDir = join(__dirname, '../maps');
         const results = [];
 
         // 1. Calculate total size
@@ -1166,6 +1459,152 @@ app.post('/api/maps/send-to-robot', async (req, res) => {
     }
 });
 
+// --- Schedule Manager Integration ---
+
+async function fileExists(path) {
+    try { await access(path); return true; } catch { return false; }
+}
+
+async function dirExists(path) {
+    try { const s = await stat(path); return s.isDirectory(); } catch { return false; }
+}
+
+async function uploadFileToRobot(host, port, filePath, fileName, destinationPath) {
+    return new Promise((resolve, reject) => {
+        const fileSize = statSync(filePath).size;
+        const boundary = `----formdata-${Date.now()}-${Math.random().toString(36)}`;
+
+        const header = `--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+            `Content-Type: application/octet-stream\r\n\r\n`;
+        const footer = `\r\n--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="destination"\r\n\r\n` +
+            `${destinationPath}\r\n` +
+            `--${boundary}--\r\n`;
+
+        const options = {
+            hostname: host,
+            port: port,
+            path: '/api/files/upload',
+            method: 'POST',
+            headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': Buffer.byteLength(header) + fileSize + Buffer.byteLength(footer)
+            }
+        };
+
+        const req = http.request(options, (res) => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+                resolve();
+            } else {
+                reject(new Error(`HTTP ${res.statusCode}`));
+            }
+        });
+
+        req.on('error', reject);
+
+        req.write(header);
+        const fileStream = createReadStream(filePath);
+        fileStream.pipe(req, { end: false });
+        fileStream.on('end', () => {
+            req.write(footer);
+            req.end();
+        });
+    });
+}
+
+async function sendMapToRobotFunc(robotIp, folderName, mapName) {
+    const mapsDir = join(__dirname, '../maps');
+    const mapFolderPath = join(mapsDir, folderName);
+
+    const filesToSend = [];
+
+    try {
+        // 1. config.json
+        if (await fileExists(join(mapFolderPath, 'config.json'))) {
+            filesToSend.push({
+                filePath: join(mapFolderPath, 'config.json'),
+                fileName: 'config.json',
+                destinationPath: 'map'
+            });
+        }
+
+        // 2. map/ folder
+        const mapDir = join(mapFolderPath, 'map');
+        if (await dirExists(mapDir)) {
+            const mapFiles = await readdir(mapDir);
+            for (const file of mapFiles) {
+                filesToSend.push({
+                    filePath: join(mapDir, file),
+                    fileName: file,
+                    destinationPath: 'map/map'
+                });
+            }
+        }
+
+        // 3. queue/ folder
+        const queueDir = join(mapFolderPath, 'queue');
+        if (await dirExists(queueDir)) {
+            const queueFiles = await readdir(queueDir);
+            for (const file of queueFiles) {
+                filesToSend.push({
+                    filePath: join(queueDir, file),
+                    fileName: file,
+                    destinationPath: 'map/queue'
+                });
+            }
+        }
+
+        // Send files
+        for (const fileInfo of filesToSend) {
+            await uploadFileToRobot(robotIp, 8080, fileInfo.filePath, fileInfo.fileName, fileInfo.destinationPath);
+        }
+
+        console.log(`[sendMapToRobotFunc] Successfully sent map ${mapName} to ${robotIp}`);
+        return true;
+    } catch (error) {
+        console.error(`[sendMapToRobotFunc] Failed to send map: ${error}`);
+        throw error;
+    }
+}
+
+const scheduleManager = new ScheduleManager(sendMapToRobotFunc);
+scheduleManager.init();
+
+// API Routes for Schedules
+app.get('/api/schedules', (req, res) => {
+    res.json(scheduleManager.getSchedules());
+});
+
+app.post('/api/schedules', async (req, res) => {
+    try {
+        const schedule = await scheduleManager.addSchedule(req.body);
+        res.json(schedule);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/schedules/:id', async (req, res) => {
+    try {
+        const schedule = await scheduleManager.updateSchedule(req.params.id, req.body);
+        if (schedule) res.json(schedule);
+        else res.status(404).json({ error: 'Schedule not found' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/schedules/:id', async (req, res) => {
+    try {
+        const success = await scheduleManager.deleteSchedule(req.params.id);
+        if (success) res.json({ success: true });
+        else res.status(404).json({ error: 'Schedule not found' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Proxy all other API requests to Python backend
 app.use('/api', createProxyMiddleware({
     target: TARGET_API,
@@ -1178,9 +1617,12 @@ app.use('/api', createProxyMiddleware({
 
 // Handle SPA routing
 app.get(/.*/, (req, res) => {
-    res.sendFile(join(__dirname, 'dist', 'index.html'));
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.sendFile(join(__dirname, '../dist', 'index.html'));
 });
 
-app.listen(PORT, '127.0.0.1', () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 });

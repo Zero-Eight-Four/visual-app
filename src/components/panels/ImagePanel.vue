@@ -1,5 +1,5 @@
 <template>
-    <div ref="imagePanelRef" class="image-panel">
+    <div class="image-panel">
         <div v-if="!selectedTopic" class="no-topic">
             <p>请在右侧设置中选择摄像头</p>
         </div>
@@ -40,7 +40,6 @@ defineProps<{
 
 const settingsStore = useImageSettingsStore()
 const rosStore = useRosStore()
-const imagePanelRef = ref<HTMLDivElement>()
 const imageCanvas = ref<HTMLCanvasElement>()
 const hasImage = ref(false)
 const selectedTopic = ref('')

@@ -1,3 +1,5 @@
+import { getAuthHeaders } from '../utils/auth';
+
 const API_BASE_URL = "/api";
 
 export interface DetectionResult {
@@ -30,6 +32,7 @@ export const aiService = {
         formData.append('file', file);
         const response = await fetch(`${API_BASE_URL}/detect/video`, {
             method: 'POST',
+            headers: getAuthHeaders(),
             body: formData
         });
         if (!response.ok) {
@@ -39,7 +42,9 @@ export const aiService = {
     },
 
     async getVideosList(folderPath: string = "videos"): Promise<any> {
-        const response = await fetch(`${API_BASE_URL}/videos/list?folder_path=${encodeURIComponent(folderPath)}`);
+        const response = await fetch(`${API_BASE_URL}/videos/list?folder_path=${encodeURIComponent(folderPath)}`, {
+            headers: getAuthHeaders()
+        });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -51,6 +56,7 @@ export const aiService = {
         formData.append('folder_path', folderPath);
         const response = await fetch(`${API_BASE_URL}/detect/video/folder`, {
             method: 'POST',
+            headers: getAuthHeaders(),
             body: formData
         });
         if (!response.ok) {
@@ -61,7 +67,9 @@ export const aiService = {
 
     // Streams
     async getStreams(): Promise<Stream[]> {
-        const response = await fetch(`${API_BASE_URL}/streams`);
+        const response = await fetch(`${API_BASE_URL}/streams`, {
+            headers: getAuthHeaders()
+        });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -78,6 +86,7 @@ export const aiService = {
 
         const response = await fetch(`${API_BASE_URL}/streams/add`, {
             method: 'POST',
+            headers: getAuthHeaders(),
             body: formData
         });
         if (!response.ok) {
@@ -88,7 +97,8 @@ export const aiService = {
 
     async deleteStream(streamId: string): Promise<any> {
         const response = await fetch(`${API_BASE_URL}/streams/${streamId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: getAuthHeaders()
         });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -107,6 +117,7 @@ export const aiService = {
 
         const response = await fetch(`${API_BASE_URL}/streams/schedule/add`, {
             method: 'POST',
+            headers: getAuthHeaders(),
             body: formData
         });
         if (!response.ok) {
@@ -124,6 +135,7 @@ export const aiService = {
 
         const response = await fetch(`${API_BASE_URL}/streams/schedule/${scheduleId}`, {
             method: 'PUT',
+            headers: getAuthHeaders(),
             body: formData
         });
         if (!response.ok) {
@@ -137,7 +149,9 @@ export const aiService = {
         if (streamId) {
             url += `?stream_id=${streamId}`;
         }
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            headers: getAuthHeaders()
+        });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -146,7 +160,8 @@ export const aiService = {
 
     async deleteSchedule(scheduleId: string): Promise<any> {
         const response = await fetch(`${API_BASE_URL}/streams/schedule/${scheduleId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: getAuthHeaders()
         });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -156,7 +171,9 @@ export const aiService = {
 
     // Reports
     async getReports(): Promise<Report[]> {
-        const response = await fetch(`${API_BASE_URL}/history/reports`);
+        const response = await fetch(`${API_BASE_URL}/history/reports`, {
+            headers: getAuthHeaders()
+        });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -168,7 +185,8 @@ export const aiService = {
         // 使用本地文件操作 API 删除报告
         // 注意：使用 /api/local/ 前缀避免被 /api/reports 的代理拦截
         const response = await fetch(url, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: getAuthHeaders()
         });
 
         if (!response.ok) {

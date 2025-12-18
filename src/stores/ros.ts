@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { RosConnectionState, RosTopic } from '@/types/ros'
+import type { RosConnectionState, RosTopic, RobotStatus } from '@/types/ros'
 
 export const useRosStore = defineStore('ros', () => {
   // State
@@ -14,6 +14,7 @@ export const useRosStore = defineStore('ros', () => {
   const topics = ref<RosTopic[]>([])
   const selectedImageTopic = ref<string>('')
   const selectedStateTopic = ref<string>('')
+  const robotStatus = ref<RobotStatus | null>(null)
 
   // Computed
   const isConnected = computed(() => connectionState.value.connected)
@@ -40,16 +41,22 @@ export const useRosStore = defineStore('ros', () => {
     selectedStateTopic.value = topic
   }
 
+  function setRobotStatus(status: RobotStatus) {
+    robotStatus.value = status
+  }
+
   return {
     connectionState,
     topics,
     selectedImageTopic,
     selectedStateTopic,
+    robotStatus,
     isConnected,
     imageTopics,
     setConnectionState,
     setTopics,
     setSelectedImageTopic,
-    setSelectedStateTopic
+    setSelectedStateTopic,
+    setRobotStatus
   }
 })

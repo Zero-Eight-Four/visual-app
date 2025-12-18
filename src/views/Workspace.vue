@@ -27,7 +27,7 @@
             <!-- Center Area -->
             <div class="center-area">
                 <!-- 3D Panel (Full or Minimized) -->
-                <div ref="threeDPanelContainerRef" class="center-panel threed-panel"
+                <div class="center-panel threed-panel"
                     :class="{ 'swap-to-corner': isImagePanelExpanded }" :style="threeDPanelStyle"
                     @click="selectPanel('3d')">
                     <div class="panel-header">
@@ -39,7 +39,7 @@
                 </div>
 
                 <!-- Image Panel (Bottom Left Corner or Expanded) -->
-                <div ref="floatingPanelRef" class="floating-image-panel"
+                <div class="floating-image-panel"
                     :class="{ 'swap-to-full': isImagePanelExpanded }" @click="selectPanel('image')">
                     <div class="panel-header">
                         <h3>摄像头图像</h3>
@@ -130,31 +130,9 @@
         <!-- AI Dialog -->
         <el-dialog v-model="aiDialogVisible" title="AI助手" width="800px" :before-close="handleAIClose">
             <div class="ai-dialog-content">
-                <div v-if="!currentAIFeature" class="ai-feature-list">
-                    <div class="ai-feature-item" @click="currentAIFeature = 'vision'">
-                        <el-icon :size="32" color="#409EFF">
-                            <View />
-                        </el-icon>
-                        <h4>图像识别</h4>
-                        <p>识别场景中的物体和障碍物</p>
-                    </div>
-                    <div class="ai-feature-item">
-                        <el-icon :size="32" color="#E6A23C">
-                            <Connection />
-                        </el-icon>
-                        <h4>语音交互</h4>
-                        <p>通过语音控制机器狗</p>
-                    </div>
-                </div>
-                
-                <div v-else-if="currentAIFeature === 'vision'" class="ai-feature-view">
-                    <div class="feature-header" style="margin-bottom: 15px;">
-                        <el-button link @click="currentAIFeature = null">
-                            &lt; 返回菜单
-                        </el-button>
-                    </div>
+                <div class="ai-feature-view">
                     <div style="height: 600px;">
-                        <AIPanel />
+                        <AIPanel initialTab="video" />
                     </div>
                 </div>
             </div>
@@ -168,7 +146,7 @@
 <script setup lang="ts">
 import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
 import { ElDialog, ElButton, ElIcon, ElMessage } from 'element-plus'
-import { DataAnalysis, View, Connection } from '@element-plus/icons-vue'
+import { DataAnalysis, Connection } from '@element-plus/icons-vue'
 import ThreeDPanel from '@/components/panels/ThreeDPanel.vue'
 import ImagePanel from '@/components/panels/ImagePanel.vue'
 import RobotStatusPanel from '@/components/panels/RobotStatusPanel.vue'
@@ -227,8 +205,6 @@ onUnmounted(() => {
 })
 
 // 面板引用
-const floatingPanelRef = ref<HTMLElement>()
-const threeDPanelContainerRef = ref<HTMLElement>()
 
 // 摄像头面板放大状态
 const isImagePanelExpanded = ref(false)
@@ -258,7 +234,7 @@ const currentAIFeature = ref<string | null>(null)
 
 // 打开AI对话框
 const openAIDialog = () => {
-    currentAIFeature.value = null
+    currentAIFeature.value = 'vision'
     aiDialogVisible.value = true
 }
 

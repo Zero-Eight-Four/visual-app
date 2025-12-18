@@ -1,13 +1,21 @@
 <template>
     <div class="robot-status-panel">
         <div class="status-header">
-            <h3>机器狗状态</h3>
+            <h3>状态</h3>
             <template v-if="isConnected">
                 <el-tag type="success" size="small">
                     已连接
                 </el-tag>
                 <el-button size="small" @click="handleDisconnect">
                     切换
+                </el-button>
+                <el-button size="small" @click="openScheduleDialog">
+                    定时任务
+                </el-button>
+            </template>
+            <template v-else>
+                <el-button size="small" @click="openScheduleDialog">
+                    定时任务
                 </el-button>
             </template>
         </div>
@@ -158,6 +166,74 @@
             </div>
         </div>
 
+        <!-- Schedule Dialog -->
+        <el-dialog v-model="showScheduleDialog" title="定时任务管理" width="800px">
+            <div style="margin-bottom: 16px;">
+                <el-button type="primary" @click="handleAddSchedule">添加任务</el-button>
+            </div>
+            <el-table :data="schedules" style="width: 100%">
+                <el-table-column prop="name" label="任务名称" />
+                <el-table-column prop="robotName" label="机器狗名称" />
+                <el-table-column prop="robotIp" label="IP地址" />
+                <el-table-column label="重复">
+                    <template #default="{ row }">
+                        {{ formatDays(row.days) }}
+                    </template>
+                </el-table-column>
+                <el-table-column prop="time" label="时间" />
+                <el-table-column label="状态">
+                    <template #default="{ row }">
+                        <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" width="150">
+                    <template #default="{ row }">
+                        <el-button size="small" @click="handleEditSchedule(row)">编辑</el-button>
+                        <el-popconfirm title="确定删除吗？" @confirm="handleDeleteSchedule(row)">
+                            <template #reference>
+                                <el-button size="small" type="danger">删除</el-button>
+                            </template>
+                        </el-popconfirm>
+                    </template>
+                </el-table-column>
+            </el-table>
+        </el-dialog>
+
+        <!-- Edit Schedule Dialog -->
+        <el-dialog v-model="scheduleFormVisible" :title="isEditingSchedule ? '编辑任务' : '添加任务'" width="500px">
+            <el-form :model="scheduleForm" label-width="100px">
+                <el-form-item label="任务名称" required>
+                    <el-input v-model="scheduleForm.name" />
+                </el-form-item>
+                <el-form-item label="机器狗名称" required>
+                    <el-select v-model="scheduleForm.robotIp" placeholder="选择已保存的连接" filterable allow-create default-first-option @change="handleRobotSelectChange">
+                        <el-option v-for="robot in savedRobots" :key="robot.ip" :label="robot.name" :value="robot.ip" />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="重复日期" required>
+                    <el-checkbox-group v-model="scheduleForm.days">
+                        <el-checkbox :label="1">周一</el-checkbox>
+                        <el-checkbox :label="2">周二</el-checkbox>
+                        <el-checkbox :label="3">周三</el-checkbox>
+                        <el-checkbox :label="4">周四</el-checkbox>
+                        <el-checkbox :label="5">周五</el-checkbox>
+                        <el-checkbox :label="6">周六</el-checkbox>
+                        <el-checkbox :label="0">周日</el-checkbox>
+                    </el-checkbox-group>
+                </el-form-item>
+                <el-form-item label="启动时间" required>
+                    <el-time-picker v-model="scheduleForm.time" value-format="HH:mm:ss" placeholder="选择时间" />
+                </el-form-item>
+                <el-form-item label="启用状态">
+                    <el-switch v-model="scheduleForm.enabled" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="scheduleFormVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveSchedule">保存</el-button>
+            </template>
+        </el-dialog>
+
         <!-- Connection Dialog -->
         <ConnectionDialog v-model="showConnectionDialog" @connected="onConnected" />
     </div>
@@ -165,7 +241,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { ElTag, ElProgress, ElEmpty, ElButton, ElMessage } from 'element-plus'
+import { ElTag, ElProgress, ElEmpty, ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput, ElSelect, ElOption, ElCheckboxGroup, ElCheckbox, ElTimePicker, ElSwitch, ElTable, ElTableColumn, ElPopconfirm } from 'element-plus'
 import { useRosStore } from '@/stores/ros'
 import { rosConnection } from '@/services/rosConnection'
 import ConnectionDialog from '@/components/ConnectionDialog.vue'
@@ -446,6 +522,7 @@ const handleStatusMessage = (message: RosMessage) => {
 
         // 解析字符串格式的状态数据
         statusData.value = parseStatusString(statusString)
+        rosStore.setRobotStatus(statusData.value)
         lastUpdateTime.value = new Date().toLocaleTimeString()
     } catch (error) {
         console.error('❌ 解析状态消息失败:', error, message)
@@ -469,6 +546,147 @@ onUnmounted(() => {
         rosConnection.unsubscribe('/go2/status')
     }
 })
+// Schedule Logic
+const showScheduleDialog = ref(false)
+const schedules = ref<any[]>([])
+const scheduleFormVisible = ref(false)
+const isEditingSchedule = ref(false)
+const scheduleForm = ref({
+    id: '',
+    name: '',
+    robotName: '',
+    robotIp: '',
+    days: [] as number[],
+    time: '' as string | Date,
+    enabled: true
+})
+
+const savedRobots = ref<Array<{ name: string, ip: string }>>([])
+
+const openScheduleDialog = async () => {
+    showScheduleDialog.value = true
+    await fetchSchedules()
+    loadSavedRobots()
+}
+
+const loadSavedRobots = () => {
+    try {
+        const history = localStorage.getItem('ros_connection_history')
+        if (history) {
+            const parsed = JSON.parse(history)
+            savedRobots.value = parsed.map((item: any, index: number) => {
+                try {
+                    if (typeof item === 'string') {
+                        const match = item.match(/ws:\/\/([^:]+):/)
+                        const ip = match ? match[1] : item
+                        return { name: `Robot ${index + 1} (${ip})`, ip: ip }
+                    } else {
+                        const url = item.url || ''
+                        const match = url.match(/ws:\/\/([^:]+):/)
+                        const ip = match ? match[1] : url
+                        const name = item.name || `Robot ${index + 1}`
+                        return { name: name, ip: ip }
+                    }
+                } catch (e) {
+                    return { name: 'Unknown', ip: '' }
+                }
+            })
+        }
+    } catch (e) {
+        console.error('Failed to load saved robots', e)
+    }
+}
+
+const handleRobotSelectChange = (val: string) => {
+    const robot = savedRobots.value.find(r => r.ip === val)
+    if (robot) {
+        scheduleForm.value.robotName = robot.name
+    } else {
+        scheduleForm.value.robotName = val
+    }
+}
+
+const fetchSchedules = async () => {
+    try {
+        const res = await fetch('/api/schedules')
+        if (res.ok) {
+            schedules.value = await res.json()
+        }
+    } catch (e) {
+        console.error('Failed to fetch schedules', e)
+    }
+}
+
+const handleAddSchedule = () => {
+    isEditingSchedule.value = false
+    scheduleForm.value = {
+        id: '',
+        name: '',
+        robotName: '',
+        robotIp: '',
+        days: [],
+        time: '08:00:00',
+        enabled: true
+    }
+    scheduleFormVisible.value = true
+}
+
+const handleEditSchedule = (row: any) => {
+    isEditingSchedule.value = true
+    scheduleForm.value = { ...row }
+    scheduleFormVisible.value = true
+}
+
+const handleDeleteSchedule = async (row: any) => {
+    try {
+        const res = await fetch(`/api/schedules/${row.id}`, { method: 'DELETE' })
+        if (res.ok) {
+            ElMessage.success('删除成功')
+            fetchSchedules()
+        } else {
+            ElMessage.error('删除失败')
+        }
+    } catch (e) {
+        ElMessage.error('删除失败')
+    }
+}
+
+const saveSchedule = async () => {
+    // Format time to HH:mm:ss if it's a Date object (TimePicker)
+    if (scheduleForm.value.time instanceof Date) {
+        const d = scheduleForm.value.time as Date
+        const h = d.getHours().toString().padStart(2, '0')
+        const m = d.getMinutes().toString().padStart(2, '0')
+        const s = d.getSeconds().toString().padStart(2, '0')
+        scheduleForm.value.time = `${h}:${m}:${s}`
+    }
+
+    const url = isEditingSchedule.value ? `/api/schedules/${scheduleForm.value.id}` : '/api/schedules'
+    const method = isEditingSchedule.value ? 'PUT' : 'POST'
+
+    try {
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(scheduleForm.value)
+        })
+        if (res.ok) {
+            ElMessage.success('保存成功')
+            scheduleFormVisible.value = false
+            fetchSchedules()
+        } else {
+            ElMessage.error('保存失败')
+        }
+    } catch (e) {
+        ElMessage.error('保存失败')
+    }
+}
+
+const formatDays = (days: number[]) => {
+    const map = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    return days.sort().map(d => map[d]).join(', ')
+}
+
 </script>
 
 <style scoped>
