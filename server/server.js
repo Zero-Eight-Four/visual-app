@@ -1606,12 +1606,12 @@ app.delete('/api/schedules/:id', async (req, res) => {
 });
 
 // Proxy all other API requests to Python backend
-app.use('/api', createProxyMiddleware({
+app.use('/cscec-robot-dog', createProxyMiddleware({
     target: TARGET_API,
     changeOrigin: true,
     ws: true,
     pathRewrite: {
-        '^/': '/api/'
+        '^/': '/cscec-robot-dog/'
     }
 }));
 
