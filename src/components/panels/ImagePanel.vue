@@ -43,6 +43,9 @@ const rosStore = useRosStore()
 const imageCanvas = ref<HTMLCanvasElement>()
 const hasImage = ref(false)
 const selectedTopic = ref('')
+let lastBlobUrl: string | null = null
+let isProcessing = false
+let nextMessage: RosMessage | null = null
 
 // 默认摄像头话题列表（按优先级）
 const defaultCameraTopics = [
@@ -54,17 +57,23 @@ const defaultCameraTopics = [
     '/head_camera/rgb/image_raw'
 ]
 
-const handleImageMessage = (message: RosMessage) => {
-    if (!imageCanvas.value) return
+const processMessage = (message: RosMessage) => {
+    if (!imageCanvas.value) {
+        isProcessing = false
+        return
+    }
 
     try {
-        let imageData: string | null = null
+        let imageBlob: Blob | null = null
 
         // 处理 sensor_msgs/Image (未压缩图像)
         if (message.encoding && message.width && message.height && message.data) {
             const canvas = imageCanvas.value
             const ctx = canvas.getContext('2d')
-            if (!ctx) return
+            if (!ctx) {
+                isProcessing = false
+                return
+            }
 
             canvas.width = message.width
             canvas.height = message.height
@@ -91,22 +100,32 @@ const handleImageMessage = (message: RosMessage) => {
 
                 const imgData = ctx.createImageData(message.width, message.height)
                 const isBGR = encoding.includes('bgr')
+                const d = imgData.data
+                let idx = 0
+                const len = data.length
 
-                for (let i = 0; i < data.length; i += 3) {
-                    const idx = (i / 3) * 4
-                    if (isBGR) {
-                        imgData.data[idx] = data[i + 2]     // R
-                        imgData.data[idx + 1] = data[i + 1] // G
-                        imgData.data[idx + 2] = data[i]     // B
-                    } else {
-                        imgData.data[idx] = data[i]         // R
-                        imgData.data[idx + 1] = data[i + 1] // G
-                        imgData.data[idx + 2] = data[i + 2] // B
+                if (isBGR) {
+                    for (let i = 0; i < len; i += 3) {
+                        d[idx] = data[i + 2]     // R
+                        d[idx + 1] = data[i + 1] // G
+                        d[idx + 2] = data[i]     // B
+                        d[idx + 3] = 255         // A
+                        idx += 4
                     }
-                    imgData.data[idx + 3] = 255 // A
+                } else {
+                    for (let i = 0; i < len; i += 3) {
+                        d[idx] = data[i]         // R
+                        d[idx + 1] = data[i + 1] // G
+                        d[idx + 2] = data[i + 2] // B
+                        d[idx + 3] = 255         // A
+                        idx += 4
+                    }
                 }
                 ctx.putImageData(imgData, 0, 0)
                 hasImage.value = true
+                
+                // 处理完成，检查是否有新消息
+                checkNextMessage()
                 return
             } else if (encoding.includes('mono8') || encoding === '8uc1') {
                 // 灰度图像
@@ -126,15 +145,22 @@ const handleImageMessage = (message: RosMessage) => {
                 }
 
                 const imgData = ctx.createImageData(message.width, message.height)
-                for (let i = 0; i < data.length; i++) {
-                    const idx = i * 4
-                    imgData.data[idx] = data[i]     // R
-                    imgData.data[idx + 1] = data[i] // G
-                    imgData.data[idx + 2] = data[i] // B
-                    imgData.data[idx + 3] = 255     // A
+                const d = imgData.data
+                const len = data.length
+                let idx = 0
+                for (let i = 0; i < len; i++) {
+                    const val = data[i]
+                    d[idx] = val     // R
+                    d[idx + 1] = val // G
+                    d[idx + 2] = val // B
+                    d[idx + 3] = 255 // A
+                    idx += 4
                 }
                 ctx.putImageData(imgData, 0, 0)
                 hasImage.value = true
+                
+                // 处理完成，检查是否有新消息
+                checkNextMessage()
                 return
             }
         }
@@ -154,21 +180,25 @@ const handleImageMessage = (message: RosMessage) => {
                         format = 'jpeg'
                     }
                 }
-                imageData = `data:image/${format};base64,${message.data}`
+                
+                // 将 base64 转换为 Blob
+                try {
+                    const binaryString = atob(message.data)
+                    const len = binaryString.length
+                    const bytes = new Uint8Array(len)
+                    for (let i = 0; i < len; i++) {
+                        bytes[i] = binaryString.charCodeAt(i)
+                    }
+                    imageBlob = new Blob([bytes], { type: `image/${format}` })
+                } catch (e) {
+                    console.error('Base64 decode error:', e)
+                }
             }
             // 处理 Uint8Array 格式 (CompressedImage 的二进制数据)
             else if (message.data instanceof Uint8Array || Array.isArray(message.data)) {
                 const uint8Array = message.data instanceof Uint8Array
                     ? message.data
                     : new Uint8Array(message.data)
-
-                // 转换为 base64
-                let binary = ''
-                const len = uint8Array.byteLength
-                for (let i = 0; i < len; i++) {
-                    binary += String.fromCharCode(uint8Array[i])
-                }
-                const base64 = btoa(binary)
 
                 let format = 'jpeg'
                 if (message.format) {
@@ -177,35 +207,70 @@ const handleImageMessage = (message: RosMessage) => {
                         format = 'png'
                     }
                 }
-                imageData = `data:image/${format};base64,${base64}`
+                
+                imageBlob = new Blob([uint8Array], { type: `image/${format}` })
             }
         }
 
-        if (imageData) {
-            const img = new Image()
+        if (imageBlob) {
+            // 使用 createImageBitmap 直接从 Blob 创建位图，避免使用 URL.createObjectURL 导致 Network 面板刷屏
+            createImageBitmap(imageBlob)
+                .then(bitmap => {
+                    const canvas = imageCanvas.value
+                    if (!canvas) {
+                        bitmap.close()
+                        checkNextMessage()
+                        return
+                    }
 
-            img.onload = () => {
-                const canvas = imageCanvas.value
-                if (!canvas) return
+                    const ctx = canvas.getContext('2d')
+                    if (!ctx) {
+                        bitmap.close()
+                        checkNextMessage()
+                        return
+                    }
 
-                const ctx = canvas.getContext('2d')
-                if (!ctx) return
-
-                canvas.width = img.width
-                canvas.height = img.height
-                ctx.drawImage(img, 0, 0)
-                hasImage.value = true
-            }
-
-            img.onerror = (err) => {
-                console.error('Failed to load image:', err)
-            }
-
-            img.src = imageData
+                    canvas.width = bitmap.width
+                    canvas.height = bitmap.height
+                    ctx.drawImage(bitmap, 0, 0)
+                    bitmap.close() // 绘制完成后释放位图资源
+                    hasImage.value = true
+                    
+                    checkNextMessage()
+                })
+                .catch(err => {
+                    console.error('Failed to create image bitmap:', err)
+                    checkNextMessage()
+                })
+        } else {
+            checkNextMessage()
         }
     } catch (error) {
         console.error('Error processing image message:', error)
+        checkNextMessage()
     }
+}
+
+const checkNextMessage = () => {
+    if (nextMessage) {
+        const msg = nextMessage
+        nextMessage = null
+        // 使用 requestAnimationFrame 避免阻塞 UI
+        requestAnimationFrame(() => processMessage(msg))
+    } else {
+        isProcessing = false
+    }
+}
+
+const handleImageMessage = (message: RosMessage) => {
+    if (isProcessing) {
+        // 如果正在处理，只更新最新消息，丢弃中间的消息
+        nextMessage = message
+        return
+    }
+
+    isProcessing = true
+    processMessage(message)
 }
 
 // 自动选择并订阅默认摄像头话题
@@ -365,6 +430,9 @@ onMounted(() => {
 onUnmounted(() => {
     if (selectedTopic.value) {
         rosConnection.unsubscribe(selectedTopic.value)
+    }
+    if (lastBlobUrl && lastBlobUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(lastBlobUrl)
     }
 })
 </script>
