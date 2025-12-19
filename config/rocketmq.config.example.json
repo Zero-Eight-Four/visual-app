@@ -1,0 +1,9 @@
+{
+    "endpoints": "127.0.0.1:8081",
+    "accessKey": "yourAccessKey",
+    "secretKey": "yourSecretKey",
+    "namespace": "",
+    "producerTopic": "visual_app_up",
+    "consumerTopic": "visual_app_down",
+    "consumerGroup": "visual-app-consumer"
+}
