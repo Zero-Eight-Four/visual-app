@@ -274,6 +274,7 @@ const handleAIClose = () => {
     flex: 1;
     display: grid;
     grid-template-columns: 280px 1fr 280px;
+    grid-template-rows: 1fr;
     gap: 12px;
     padding: 12px;
     background-color: #f5f5f5;
@@ -286,6 +287,7 @@ const handleAIClose = () => {
     flex-direction: column;
     gap: 12px;
     overflow: hidden;
+    min-height: 0;
 }
 
 .left-panel {
@@ -312,6 +314,7 @@ const handleAIClose = () => {
 .center-area {
     position: relative;
     min-height: 0;
+    min-width: 0;
     overflow: hidden;
 }
 
@@ -417,6 +420,8 @@ const handleAIClose = () => {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .right-panel {

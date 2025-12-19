@@ -1,13 +1,14 @@
 [
   {
-    "id": "1765940603082",
-    "name": "1",
+    "id": "1766132853487",
+    "name": "test",
     "robotName": "go2",
     "robotIp": "8.148.247.53",
     "days": [
-      1
+      5
     ],
-    "time": "08:00:00",
-    "enabled": true
+    "time": "16:54",
+    "enabled": true,
+    "lastTriggered": "5-16:51"
   }
 ]

@@ -21,6 +21,7 @@ build/
 .env.development
 
 # 编辑器/IDE
+.github/
 .vscode/
 .idea/
 *.swp
@@ -64,6 +65,7 @@ temp/
 maps/
 videos/
 reports/
+images/
 temp/
 
 # TypeScript

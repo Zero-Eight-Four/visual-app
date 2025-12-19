@@ -222,7 +222,7 @@
                     </el-checkbox-group>
                 </el-form-item>
                 <el-form-item label="启动时间" required>
-                    <el-time-picker v-model="scheduleForm.time" value-format="HH:mm:ss" placeholder="选择时间" />
+                    <el-time-picker v-model="scheduleForm.time" value-format="HH:mm" format="HH:mm" placeholder="选择时间" />
                 </el-form-item>
                 <el-form-item label="启用状态">
                     <el-switch v-model="scheduleForm.enabled" />
@@ -505,6 +505,27 @@ const parseStatusString = (statusString: string): RobotStatus => {
     return data
 }
 
+// 温度保护状态
+const isTempProtectionActive = ref(false)
+
+// 检查温度并执行保护逻辑
+const checkTemperatureProtection = (status: RobotStatus) => {
+    const maxTemp = status.motor_hottest_temp
+    if (maxTemp === undefined) return
+
+    if (maxTemp > 70 && !isTempProtectionActive.value) {
+        // 触发高温保护
+        isTempProtectionActive.value = true
+        rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'stop' })
+        ElMessage.error(`警告：电机温度过高 (${maxTemp.toFixed(1)}°C)，已发送停止指令！`)
+    } else if (maxTemp < 50 && isTempProtectionActive.value) {
+        // 解除高温保护
+        isTempProtectionActive.value = false
+        rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'start' })
+        ElMessage.success(`电机温度已恢复正常 (${maxTemp.toFixed(1)}°C)，已发送启动指令。`)
+    }
+}
+
 // 处理状态消息
 const handleStatusMessage = (message: RosMessage) => {
     try {
@@ -524,6 +545,9 @@ const handleStatusMessage = (message: RosMessage) => {
         statusData.value = parseStatusString(statusString)
         rosStore.setRobotStatus(statusData.value)
         lastUpdateTime.value = new Date().toLocaleTimeString()
+
+        // 检查温度保护
+        checkTemperatureProtection(statusData.value)
     } catch (error) {
         console.error('❌ 解析状态消息失败:', error, message)
     }
@@ -625,7 +649,7 @@ const handleAddSchedule = () => {
         robotName: '',
         robotIp: '',
         days: [],
-        time: '08:00:00',
+        time: '08:00',
         enabled: true
     }
     scheduleFormVisible.value = true
@@ -652,13 +676,12 @@ const handleDeleteSchedule = async (row: any) => {
 }
 
 const saveSchedule = async () => {
-    // Format time to HH:mm:ss if it's a Date object (TimePicker)
+    // Format time to HH:mm if it's a Date object (TimePicker)
     if (scheduleForm.value.time instanceof Date) {
         const d = scheduleForm.value.time as Date
         const h = d.getHours().toString().padStart(2, '0')
         const m = d.getMinutes().toString().padStart(2, '0')
-        const s = d.getSeconds().toString().padStart(2, '0')
-        scheduleForm.value.time = `${h}:${m}:${s}`
+        scheduleForm.value.time = `${h}:${m}`
     }
 
     const url = isEditingSchedule.value ? `/api/schedules/${scheduleForm.value.id}` : '/api/schedules'
