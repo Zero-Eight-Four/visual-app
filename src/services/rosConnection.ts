@@ -59,10 +59,22 @@ class RosConnection {
   private heartbeatTimer: any = null
   private heartbeatFailCount = 0
   private heartbeatPaused = false // 心跳是否暂停
-  private readonly HEARTBEAT_INTERVAL = 5000 // 5秒心跳（增加间隔，减少频率）
-  private readonly HEARTBEAT_TIMEOUT = 3000 // 3秒超时（增加超时时间）
-  private readonly MAX_HEARTBEAT_FAILURES = 5 // 最大失败次数（增加容错）
+  private readonly HEARTBEAT_INTERVAL = 10000 // 10秒心跳（增加间隔，减少频率）
+  private readonly HEARTBEAT_TIMEOUT = 10000 // 10秒超时（增加超时时间）
+  private readonly MAX_HEARTBEAT_FAILURES = 10 // 10次失败（增加容错）
   private readonly HEARTBEAT_START_DELAY = 5000 // 连接建立后延迟5秒再开始心跳
+
+  constructor() {
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          this.pauseHeartbeat()
+        } else {
+          this.resumeHeartbeat()
+        }
+      })
+    }
+  }
 
   /**
    * 连接到ROS Bridge服务器
@@ -181,7 +193,14 @@ class RosConnection {
   private startHeartbeat() {
     this.stopHeartbeat()
     this.heartbeatFailCount = 0
-    this.heartbeatPaused = false
+
+    // 初始检查页面可见性
+    if (typeof document !== 'undefined' && document.hidden) {
+      this.heartbeatPaused = true
+      console.log('[Heartbeat] 页面不可见，初始状态为暂停')
+    } else {
+      this.heartbeatPaused = false
+    }
 
     this.heartbeatTimer = setInterval(() => {
       // 如果心跳已暂停，跳过本次检测
@@ -338,8 +357,9 @@ class RosConnection {
       ros: this.ros,
       name: subscription.topic,
       messageType: subscription.messageType,
-      throttle_rate: 200,
-      queue_length: 1
+      throttle_rate: subscription.throttleRate ?? 200,
+      queue_length: 1,
+      compression: subscription.compression || 'none'
     })
 
     listener.subscribe((message: RosMessage) => {

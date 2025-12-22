@@ -288,9 +288,27 @@ const submitBatchServerVideos = async () => {
     }
 }
 
+import { API_BASE_URL } from '@/config'
+
 // Video Detection (Single Upload) - Removed
 
 const getReportFullUrl = (url: string) => {
+    // 如果是生产环境，直接返回完整 URL
+    if (import.meta.env.PROD) {
+        if (url.startsWith('http')) return url
+        // 如果是相对路径，拼接 API_BASE_URL
+        // 假设 url 是 /reports/xxx.html
+        // API_BASE_URL 是 https://ibl.zjypwy.com/cscec-robot-dog/api
+        // 我们需要 https://ibl.zjypwy.com/cscec-robot-dog/api/reports/xxx.html
+        // 或者如果 url 已经包含 /api，则不需要拼接
+        if (url.startsWith('/api')) {
+             const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+             return `${baseUrl}${url}`
+        }
+        // 假设 url 是 /reports/xxx
+        return `${API_BASE_URL}${url}`
+    }
+
     // If URL is absolute and points to the backend IP, convert to relative /api path
     if (url.startsWith('https://ibl.zjypwy.com/cscec-robot-dog/api')) {
         return url.replace('https://ibl.zjypwy.com/cscec-robot-dog/api', '/api')

@@ -1,6 +1,5 @@
 import { getAuthHeaders } from '../utils/auth';
-
-const API_BASE_URL = "/api";
+import { API_BASE_URL } from '@/config';
 
 export interface DetectionResult {
     filename: string;
@@ -196,6 +195,10 @@ export const aiService = {
     },
 
     getReportUrl(filename: string): string {
+        // 如果是生产环境，返回完整 URL
+        if (import.meta.env.PROD) {
+            return `${API_BASE_URL}/reports/${encodeURIComponent(filename)}`;
+        }
         return `${API_BASE_URL}/reports/${encodeURIComponent(filename)}`;
     }
 };

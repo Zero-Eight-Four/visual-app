@@ -5,6 +5,7 @@
 
 import type { MapInfo, MapConfig } from '@/types/map'
 import { getAuthHeaders } from './auth'
+import { API_BASE_URL } from '@/config'
 
 /**
  * 获取所有地图信息
@@ -13,7 +14,7 @@ import { getAuthHeaders } from './auth'
 export async function fetchAllMaps(): Promise<MapInfo[]> {
   try {
     // 首先获取 maps 目录下的所有文件夹
-    const response = await fetch('/api/maps/list', {
+    const response = await fetch(`${API_BASE_URL}/maps/list`, {
       headers: getAuthHeaders()
     })
 
@@ -147,7 +148,12 @@ async function fetchMapInfo(folderName: string): Promise<MapInfo | null> {
 async function fetchMapConfig(folderName: string): Promise<MapConfig | null> {
   try {
     // 尝试读取 config.json
-    const configUrl = `/maps/${encodeURIComponent(folderName)}/config.json`
+    let configUrl = `/maps/${encodeURIComponent(folderName)}/config.json`
+    if (import.meta.env.PROD) {
+      const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+      configUrl = `${baseUrl}${configUrl}`
+    }
+
     const response = await fetch(configUrl, {
       headers: getAuthHeaders()
     })
@@ -167,7 +173,11 @@ async function fetchMapConfig(folderName: string): Promise<MapConfig | null> {
     }
 
     // 如果 config.json 不存在，尝试读取 map.json
-    const mapConfigUrl = `/maps/${encodeURIComponent(folderName)}/map.json`
+    let mapConfigUrl = `/maps/${encodeURIComponent(folderName)}/map.json`
+    if (import.meta.env.PROD) {
+      const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+      mapConfigUrl = `${baseUrl}${mapConfigUrl}`
+    }
     const mapConfigResponse = await fetch(mapConfigUrl, {
       headers: getAuthHeaders()
     })
@@ -200,7 +210,7 @@ async function fetchMapConfig(folderName: string): Promise<MapConfig | null> {
 async function findPgmFile(folderName: string): Promise<string | null> {
   // 1. 尝试通过 API 获取 (JSON)
   try {
-    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
+    const apiUrl = `${API_BASE_URL}/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
     const response = await fetch(apiUrl, {
       headers: getAuthHeaders()
     })
@@ -209,7 +219,12 @@ async function findPgmFile(folderName: string): Promise<string | null> {
       if (data.success && data.files) {
         const pgmFile = data.files.find((f: any) => f.name.endsWith('.pgm'))
         if (pgmFile) {
-          return pgmFile.url // API 返回完整的 URL 路径
+          let url = pgmFile.url
+          if (import.meta.env.PROD && !url.startsWith('http')) {
+            const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+            url = `${baseUrl}${url}`
+          }
+          return url // API 返回完整的 URL 路径
         }
       }
     }
@@ -286,7 +301,7 @@ async function findPgmInRoot(folderName: string): Promise<string | null> {
 async function findPcdFile(folderName: string): Promise<string | undefined> {
   // 1. 尝试通过 API 获取 (JSON)
   try {
-    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
+    const apiUrl = `${API_BASE_URL}/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
     const response = await fetch(apiUrl, {
       headers: getAuthHeaders()
     })
@@ -295,7 +310,12 @@ async function findPcdFile(folderName: string): Promise<string | undefined> {
       if (data.success && data.files) {
         const pcdFile = data.files.find((f: any) => f.name.endsWith('.pcd'))
         if (pcdFile) {
-          return pcdFile.url
+          let url = pcdFile.url
+          if (import.meta.env.PROD && !url.startsWith('http')) {
+            const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+            url = `${baseUrl}${url}`
+          }
+          return url
         }
       }
     }
@@ -338,7 +358,7 @@ async function findPcdFile(folderName: string): Promise<string | undefined> {
 async function findYamlFile(folderName: string): Promise<string | undefined> {
   // 1. 尝试通过 API 获取 (JSON)
   try {
-    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
+    const apiUrl = `${API_BASE_URL}/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
     const response = await fetch(apiUrl, {
       headers: getAuthHeaders()
     })
@@ -347,7 +367,12 @@ async function findYamlFile(folderName: string): Promise<string | undefined> {
       if (data.success && data.files) {
         const yamlFile = data.files.find((f: any) => f.name.endsWith('.yaml') || f.name.endsWith('.yml'))
         if (yamlFile) {
-          return yamlFile.url
+          let url = yamlFile.url
+          if (import.meta.env.PROD && !url.startsWith('http')) {
+            const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+            url = `${baseUrl}${url}`
+          }
+          return url
         }
       }
     }
@@ -405,7 +430,7 @@ async function countQueueFiles(folderName: string): Promise<number> {
 export async function getQueueFiles(folderName: string): Promise<string[]> {
   // 1. 尝试通过 API 获取 (JSON)
   try {
-    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=queue`
+    const apiUrl = `${API_BASE_URL}/maps/files?folder=${encodeURIComponent(folderName)}&subDir=queue`
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 10000)
     const response = await fetch(apiUrl, {
@@ -419,7 +444,14 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
       if (data.success && data.files) {
         return data.files
           .filter((f: any) => f.name.endsWith('.json'))
-          .map((f: any) => f.url)
+          .map((f: any) => {
+            let url = f.url
+            if (import.meta.env.PROD && !url.startsWith('http')) {
+              const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+              url = `${baseUrl}${url}`
+            }
+            return url
+          })
       }
     }
   } catch (e) {
@@ -452,7 +484,12 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
       const href = link.getAttribute('href')
       if (href && href.endsWith('.json')) {
         const fileName = href.replace(/^.*\//, '')
-        files.push(`/maps/${encodeURIComponent(folderName)}/queue/${fileName}`)
+        let url = `/maps/${encodeURIComponent(folderName)}/queue/${fileName}`
+        if (import.meta.env.PROD) {
+          const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+          url = `${baseUrl}${url}`
+        }
+        files.push(url)
       }
     })
 
@@ -469,7 +506,7 @@ export async function getQueueFiles(folderName: string): Promise<string[]> {
 export async function getMapFiles(folderName: string): Promise<string[]> {
   // 1. 尝试通过 API 获取 (JSON)
   try {
-    const apiUrl = `/api/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
+    const apiUrl = `${API_BASE_URL}/maps/files?folder=${encodeURIComponent(folderName)}&subDir=map`
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 10000)
     const response = await fetch(apiUrl, {
@@ -486,7 +523,14 @@ export async function getMapFiles(folderName: string): Promise<string[]> {
             const name = f.name.toLowerCase()
             return name.endsWith('.pgm') || name.endsWith('.pcd') || name.endsWith('.yaml') || name.endsWith('.yml')
           })
-          .map((f: any) => f.url)
+          .map((f: any) => {
+            let url = f.url
+            if (import.meta.env.PROD && !url.startsWith('http')) {
+              const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+              url = `${baseUrl}${url}`
+            }
+            return url
+          })
       }
     }
   } catch (e) {
@@ -522,7 +566,12 @@ export async function getMapFiles(folderName: string): Promise<string[]> {
         // 只包含地图相关文件
         if (fileName.endsWith('.pgm') || fileName.endsWith('.pcd') ||
           fileName.endsWith('.yaml') || fileName.endsWith('.yml')) {
-          files.push(`/maps/${encodeURIComponent(folderName)}/map/${fileName}`)
+          let url = `/maps/${encodeURIComponent(folderName)}/map/${fileName}`
+          if (import.meta.env.PROD) {
+            const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+            url = `${baseUrl}${url}`
+          }
+          files.push(url)
         }
       }
     })

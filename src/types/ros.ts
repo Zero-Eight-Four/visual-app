@@ -17,6 +17,8 @@ export interface TopicSubscription {
   topic: string
   messageType: string
   callback: (message: RosMessage) => void
+  compression?: 'png' | 'cbor' | 'none'
+  throttleRate?: number
 }
 
 export interface ServiceRequest {

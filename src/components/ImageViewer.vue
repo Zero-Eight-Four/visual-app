@@ -99,6 +99,7 @@
 </template>
 
 <script setup lang="ts">
+import { API_BASE_URL } from '@/config'
 import { ref, computed, onUnmounted } from 'vue'
 import { ElSelect, ElOption, ElButton, ElButtonGroup, ElDialog, ElForm, ElFormItem, ElRadioGroup, ElRadio, ElInputNumber, ElTable, ElTableColumn, ElInput, ElMessage, ElMessageBox, ElIcon } from 'element-plus'
 import { VideoCamera, VideoPause, FolderOpened } from '@element-plus/icons-vue'
@@ -342,7 +343,7 @@ const saveVideo = async () => {
 
         formData.append('video', blob, fileName)
 
-        const response = await fetch('/api/videos/upload', {
+        const response = await fetch(`${API_BASE_URL}/videos/upload`, {
             method: 'POST',
             body: formData
         })
@@ -364,7 +365,7 @@ const saveVideo = async () => {
 // 加载视频列表
 const loadVideoList = async () => {
     try {
-        const response = await fetch('/api/videos/list')
+        const response = await fetch(`${API_BASE_URL}/videos/list`)
         const result = await response.json()
 
         if (result.dates && result.videos) {
@@ -414,7 +415,7 @@ const confirmRenameVideo = async () => {
 
     try {
         const newFileName = renameNewName.value.trim() + '.webm'
-        const response = await fetch('/api/videos/rename', {
+        const response = await fetch(`${API_BASE_URL}/videos/rename`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -451,7 +452,11 @@ const handleDownloadVideo = (video: { name: string; folder?: string }) => {
     }
     
     // Construct absolute URL using current origin to ensure protocol matches
-    const url = new URL(path, window.location.origin).href
+    let url = new URL(path, window.location.origin).href
+    if (import.meta.env.PROD) {
+        const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+        url = `${baseUrl}${path}`
+    }
     console.log('Download URL:', url)
 
     const link = document.createElement('a')
@@ -476,7 +481,7 @@ const handleDeleteVideo = async (video: { name: string; folder?: string }) => {
             }
         )
 
-        const response = await fetch('/api/videos/delete', {
+        const response = await fetch(`${API_BASE_URL}/videos/delete`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json'

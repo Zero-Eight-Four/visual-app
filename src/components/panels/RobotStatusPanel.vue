@@ -240,6 +240,7 @@
 </template>
 
 <script setup lang="ts">
+import { API_BASE_URL } from '@/config'
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElTag, ElProgress, ElEmpty, ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput, ElSelect, ElOption, ElCheckboxGroup, ElCheckbox, ElTimePicker, ElSwitch, ElTable, ElTableColumn, ElPopconfirm } from 'element-plus'
 import { useRosStore } from '@/stores/ros'
@@ -632,7 +633,7 @@ const handleRobotSelectChange = (val: string) => {
 
 const fetchSchedules = async () => {
     try {
-        const res = await fetch('/api/schedules')
+        const res = await fetch(`${API_BASE_URL}/schedules`)
         if (res.ok) {
             schedules.value = await res.json()
         }
@@ -663,7 +664,7 @@ const handleEditSchedule = (row: any) => {
 
 const handleDeleteSchedule = async (row: any) => {
     try {
-        const res = await fetch(`/api/schedules/${row.id}`, { method: 'DELETE' })
+        const res = await fetch(`${API_BASE_URL}/schedules/${row.id}`, { method: 'DELETE' })
         if (res.ok) {
             ElMessage.success('删除成功')
             fetchSchedules()
@@ -684,7 +685,7 @@ const saveSchedule = async () => {
         scheduleForm.value.time = `${h}:${m}`
     }
 
-    const url = isEditingSchedule.value ? `/api/schedules/${scheduleForm.value.id}` : '/api/schedules'
+    const url = isEditingSchedule.value ? `${API_BASE_URL}/schedules/${scheduleForm.value.id}` : `${API_BASE_URL}/schedules`
     const method = isEditingSchedule.value ? 'PUT' : 'POST'
 
     try {

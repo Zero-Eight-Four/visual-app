@@ -1,4 +1,5 @@
 import { getAuthHeaders } from './auth'
+import { API_BASE_URL } from '@/config'
 
 /**
  * 基于 HTTP API 的文件传输工具
@@ -29,7 +30,7 @@ export interface HttpFileItem {
 
 // 默认配置
 const DEFAULT_CONFIG: Partial<HttpFileTransferConfig> = {
-  apiPrefix: '/api/files',
+  apiPrefix: `${API_BASE_URL}/files`,
   timeout: 30000
 }
 
@@ -483,6 +484,17 @@ export function createHttpFileTransferClient(
   wsUrl: string,
   httpPort: number = 8080
 ): HttpFileTransferClient {
+  // 如果是生产环境，使用 API_BASE_URL 的根路径作为 baseUrl
+  if (import.meta.env.PROD) {
+    // 假设 API_BASE_URL 是 https://ibl.zjypwy.com/cscec-robot-dog/api
+    // 我们需要 https://ibl.zjypwy.com/cscec-robot-dog
+    const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+    return new HttpFileTransferClient({
+      baseUrl,
+      apiPrefix: `${API_BASE_URL}/files`
+    })
+  }
+
   const baseUrl = extractHttpUrlFromWsUrl(wsUrl, httpPort)
   return new HttpFileTransferClient({ baseUrl })
 }

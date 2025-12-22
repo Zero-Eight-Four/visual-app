@@ -322,6 +322,12 @@
                                 </el-icon>
                                 标签
                             </el-button>
+                            <el-button @click="showLabelManager = true" title="管理标签" :disabled="labels.length === 0">
+                                <el-icon>
+                                    <List />
+                                </el-icon>
+                                管理标签
+                            </el-button>
                         </el-button-group>
                         <el-input-number v-model="brushSize" :min="1" :max="50" :step="1"
                             style="width: 100px; margin-left: 10px;" title="画笔大小" />
@@ -364,6 +370,30 @@
                     </el-button>
                 </div>
             </div>
+        </el-dialog>
+
+        <!-- 标签管理对话框 -->
+        <el-dialog v-model="showLabelManager" title="标签管理" width="500px" append-to-body>
+            <div v-if="labels.length === 0" class="empty-labels">
+                <p>暂无标签</p>
+            </div>
+            <el-table v-else :data="labels" style="width: 100%" max-height="400">
+                <el-table-column prop="name" label="名称" />
+                <el-table-column label="坐标" width="180">
+                    <template #default="scope">
+                        X: {{ scope.row.x }}, Y: {{ scope.row.y }}
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" width="80" align="center">
+                    <template #default="scope">
+                        <el-button type="danger" :icon="Delete" circle size="small"
+                            @click="removeLabel(scope.$index)" title="删除标签" />
+                    </template>
+                </el-table-column>
+            </el-table>
+            <template #footer>
+                <el-button @click="showLabelManager = false">关闭</el-button>
+            </template>
         </el-dialog>
 
         <!-- 保存地图对话框 -->
@@ -522,9 +552,10 @@
 </template>
 
 <script setup lang="ts">
+import { API_BASE_URL } from '@/config'
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { ElButton, ElButtonGroup, ElDialog, ElIcon, ElMessage, ElMessageBox, ElInputNumber, ElRadioGroup, ElRadio, ElInput, ElAlert, ElProgress, ElDivider, ElForm, ElFormItem } from 'element-plus'
-import { Location, FolderOpened, Edit, Document, Check, Upload, Delete, ZoomIn, ZoomOut, Refresh, Warning, InfoFilled } from '@element-plus/icons-vue'
+import { Location, FolderOpened, Edit, Document, Check, Upload, Delete, ZoomIn, ZoomOut, Refresh, Warning, InfoFilled, List } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
 import { createHttpFileTransferClient } from '@/utils/httpFileTransferUtils'
 import { fetchAllMaps, getQueueFiles, getMapFiles } from '@/utils/mapUtils'
@@ -601,6 +632,12 @@ const saveMapNameForm = ref({ name: '', description: '' })
 // 标签相关
 const labels = ref<{ name: string; x: number; y: number }[]>([])
 const mapMeta = ref<{ resolution: number; origin: [number, number, number] } | null>(null)
+const showLabelManager = ref(false)
+
+const removeLabel = (index: number) => {
+    labels.value.splice(index, 1)
+    redrawCanvas()
+}
 
 // 上传进度相关
 const showUploadProgress = ref(false)
@@ -665,7 +702,7 @@ const handleUploadTopicMessage = async (message: any) => {
         const wsUrlObj = new URL(wsUrl)
         const robotHttpUrl = `http://${wsUrlObj.hostname}:8080`
 
-        const response = await fetch('/api/images/download-from-robot', {
+        const response = await fetch(`${API_BASE_URL}/images/download-from-robot`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ robotUrl: robotHttpUrl, folderPath: relativePath, targetName })
@@ -1182,7 +1219,7 @@ const confirmUploadMap = async () => {
 
             try {
                 // 调用服务器端 API，直接从机器狗下载并保存
-                const response = await fetch('/api/maps/download-from-robot', {
+                const response = await fetch(`${API_BASE_URL}/maps/download-from-robot`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1553,7 +1590,7 @@ const confirmUploadMap = async () => {
 
 
             uploadMapStatusText.value = '开始上传...'
-            xhr.open('POST', '/api/maps/save')
+            xhr.open('POST', `${API_BASE_URL}/maps/save`)
             xhr.send(formData)
         })
     } catch (error) {
@@ -1742,7 +1779,7 @@ const handleDeleteMap = async (map: MapInfo) => {
         )
 
         // 调用更新配置API，标记为已删除
-        const response = await fetch('/api/maps/update-config', {
+        const response = await fetch(`${API_BASE_URL}/maps/update-config`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -2000,7 +2037,7 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             const wsUrlObj = new URL(wsUrl)
             const robotHttpUrl = `http://${wsUrlObj.hostname}:8080`
             
-            const response = await fetch('/api/maps/send-to-robot', {
+            const response = await fetch(`${API_BASE_URL}/maps/send-to-robot`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -2359,6 +2396,17 @@ const loadMapForEdit = async (mapPath: string) => {
         })
         url = encodedParts.join('/')
 
+        // 如果是生产环境，添加 API_BASE_URL 前缀（如果 url 不包含 http）
+        if (import.meta.env.PROD && !url.startsWith('http')) {
+             // 注意：API_BASE_URL 包含 /api，但这里是静态文件 /maps
+             // 如果后端将 /maps 映射到静态文件，我们需要确认路径
+             // 假设后端 API_BASE_URL 的根路径也服务 /maps
+             // 或者我们需要一个新的 STATIC_BASE_URL
+             // 简单起见，假设 API_BASE_URL 去掉 /api 后是根路径
+             const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+             url = `${baseUrl}${url}`
+        }
+
         const response = await fetch(url)
 
         if (!response.ok) {
@@ -2396,6 +2444,11 @@ const loadMapForEdit = async (mapPath: string) => {
                     yamlUrl = '/maps' + yamlUrl
                 }
                 
+                if (import.meta.env.PROD && !yamlUrl.startsWith('http')) {
+                     const baseUrl = API_BASE_URL.replace(/\/api$/, '')
+                     yamlUrl = `${baseUrl}${yamlUrl}`
+                }
+
                 const yamlRes = await fetch(yamlUrl)
                 if (yamlRes.ok) {
                     const yamlText = await yamlRes.text()
@@ -2424,7 +2477,7 @@ const loadMapForEdit = async (mapPath: string) => {
         try {
             // folderName 已经在 selectedMapForEdit 中
             if (selectedMapForEdit.value) {
-                const textJsonUrl = `/maps/${selectedMapForEdit.value.folderName}/queue/text.json`
+                const textJsonUrl = `/maps/${selectedMapForEdit.value.folderName}/queue/text.json?t=${Date.now()}`
                 const textRes = await fetch(textJsonUrl)
                 if (textRes.ok) {
                     const textData = await textRes.json()
@@ -3043,17 +3096,16 @@ const saveMap = async () => {
         formData.append('folderName', targetFolder)
 
         // 保存标签文件 text.json
-        if (labels.value.length > 0) {
-            const textJsonContent = JSON.stringify(labels.value, null, 2)
-            const textBlob = new Blob([textJsonContent], { type: 'application/json' })
-            formData.append('files', textBlob, 'queue/text.json')
-        }
+        // 即使标签为空，也要保存空数组，以覆盖原有的标签文件
+        const textJsonContent = JSON.stringify(labels.value, null, 2)
+        const textBlob = new Blob([textJsonContent], { type: 'application/json' })
+        formData.append('files', textBlob, 'queue/text.json')
 
         // 覆盖模式下，mapName 必填，使用当前地图名称
         formData.append('mapName', selectedMapForEdit.value.displayName || 'Updated Map')
 
         // 上传到服务器
-        const response = await fetch('/api/maps/save', {
+        const response = await fetch(`${API_BASE_URL}/maps/save`, {
             method: 'POST',
             body: formData
         })
@@ -3100,7 +3152,7 @@ const saveMap = async () => {
 
                 try {
                     // 1. 获取 map 目录下的文件
-                    const mapRes = await fetch(`/api/maps/files?folder=${encodeURIComponent(sourceFolder)}&subDir=map`)
+                    const mapRes = await fetch(`${API_BASE_URL}/maps/files?folder=${encodeURIComponent(sourceFolder)}&subDir=map`)
                     if (mapRes.ok) {
                         const mapData = await mapRes.json()
                         if (mapData.success && mapData.files) {
@@ -3117,13 +3169,13 @@ const saveMap = async () => {
                     }
 
                     // 2. 获取 queue 目录下的文件
-                    const queueRes = await fetch(`/api/maps/files?folder=${encodeURIComponent(sourceFolder)}&subDir=queue`)
+                    const queueRes = await fetch(`${API_BASE_URL}/maps/files?folder=${encodeURIComponent(sourceFolder)}&subDir=queue`)
                     if (queueRes.ok) {
                         const queueData = await queueRes.json()
                         if (queueData.success && queueData.files) {
                             queueData.files.forEach((f: any) => {
-                                // 如果我们要保存新的 text.json，则不复制旧的
-                                if (f.name === 'text.json' && labels.value.length > 0) {
+                                // 始终不复制旧的 text.json，因为我们会生成新的（即使是空的）
+                                if (f.name === 'text.json') {
                                     return
                                 }
                                 filesToCopy.push({
@@ -3155,11 +3207,10 @@ const saveMap = async () => {
                 formData.append('files', blob, `map/${newPgmName}`)
 
                 // 保存标签文件 text.json
-                if (labels.value.length > 0) {
-                    const textJsonContent = JSON.stringify(labels.value, null, 2)
-                    const textBlob = new Blob([textJsonContent], { type: 'application/json' })
-                    formData.append('files', textBlob, 'queue/text.json')
-                }
+                // 即使标签为空，也要保存空数组
+                const textJsonContent = JSON.stringify(labels.value, null, 2)
+                const textBlob = new Blob([textJsonContent], { type: 'application/json' })
+                formData.append('files', textBlob, 'queue/text.json')
                 
                 formData.append('filesToCopy', JSON.stringify(filesToCopy))
 
@@ -3324,7 +3375,7 @@ const saveMap = async () => {
                         reject(new Error('上传已取消'))
                     })
 
-                    xhr.open('POST', '/api/maps/save-new-map')
+                    xhr.open('POST', `${API_BASE_URL}/maps/save-new-map`)
                     xhr.send(formData)
                 })
 

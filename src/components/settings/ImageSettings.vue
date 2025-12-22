@@ -239,6 +239,7 @@
 </template>
 
 <script setup lang="ts">
+import { API_BASE_URL } from '@/config'
 import { ref, computed, watch, inject, onUnmounted } from 'vue'
 import {
     ElForm,
@@ -549,7 +550,7 @@ const saveVideo = async () => {
 
         formData.append('video', blob, fileName)
 
-        const response = await fetch('/api/videos/upload', {
+        const response = await fetch(`${API_BASE_URL}/videos/upload`, {
             method: 'POST',
             body: formData
         })
@@ -571,7 +572,7 @@ const saveVideo = async () => {
 // 加载视频列表
 const loadVideoList = async () => {
     try {
-        const response = await fetch('/api/videos/list')
+        const response = await fetch(`${API_BASE_URL}/videos/list`)
         const result = await response.json()
 
         if (result.dates && result.videos) {
@@ -630,7 +631,7 @@ const confirmRenameVideo = async () => {
 
     try {
         const newFileName = renameNewName.value.trim() + '.webm'
-        const response = await fetch('/api/videos/rename', {
+        const response = await fetch(`${API_BASE_URL}/videos/rename`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -662,9 +663,9 @@ const handleDownloadVideo = (video: { name: string; folder: string }) => {
     console.log('Download video:', video)
     console.log('Current origin:', window.location.origin)
 
-    const path = `/api/videos/download?fileName=${encodeURIComponent(video.name)}&folder=${encodeURIComponent(video.folder)}`
+    const path = `${API_BASE_URL}/videos/download?fileName=${encodeURIComponent(video.name)}&folder=${encodeURIComponent(video.folder)}`
     // Construct absolute URL using current origin to ensure protocol matches
-    const url = new URL(path, window.location.origin).href
+    const url = path.startsWith('http') ? path : new URL(path, window.location.origin).href
     console.log('Download URL:', url)
     
     const link = document.createElement('a')
@@ -689,7 +690,7 @@ const handleDeleteVideo = async (video: { name: string; folder: string }) => {
             }
         )
 
-        const response = await fetch('/api/videos/delete', {
+        const response = await fetch(`${API_BASE_URL}/videos/delete`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json'

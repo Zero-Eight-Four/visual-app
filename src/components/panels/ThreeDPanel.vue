@@ -228,6 +228,7 @@ const subscribeToMap = async () => {
         await rosConnection.subscribe({
             topic: '/map',
             messageType: 'nav_msgs/OccupancyGrid',
+            compression: 'cbor',
             callback: (message: any) => {
                 hasReceivedMapData = true
                 handleMapMessage(message)

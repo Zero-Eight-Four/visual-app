@@ -6,8 +6,12 @@ import { readdir, writeFile, mkdir, rm, readFile, rename, copyFile, stat, access
 import { createReadStream, createWriteStream, statSync, constants } from 'fs';
 import http from 'http';
 import https from 'https';
+import { gzip } from 'zlib';
+import { promisify } from 'util';
 import { getRocketMQBridge } from './rocketmqBridge.js';
 import { ScheduleManager } from './scheduleManager.js';
+
+const gzipPromise = promisify(gzip);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,6 +32,35 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+// Compression middleware for PGM files
+app.use('/maps', async (req, res, next) => {
+    if (req.path.endsWith('.pgm')) {
+        try {
+            // req.path starts with /
+            const filePath = join(__dirname, '../maps', req.path);
+
+            // Check if file exists
+            try {
+                await access(filePath);
+            } catch (e) {
+                return next();
+            }
+
+            const fileContent = await readFile(filePath);
+            const compressed = await gzipPromise(fileContent);
+
+            res.setHeader('Content-Type', 'image/x-portable-graymap');
+            res.setHeader('Content-Encoding', 'gzip');
+            res.send(compressed);
+        } catch (error) {
+            console.error('Compression error:', error);
+            next();
+        }
+    } else {
+        next();
+    }
+});
 
 // Serve static files for maps
 app.use('/maps', express.static(join(__dirname, '../maps')));
@@ -203,7 +236,12 @@ async function processMultipartStream(req, res, processor) {
 app.use(express.json());
 
 // Serve static files
-app.use(express.static(join(__dirname, '../dist')));
+app.use('/robot-dog-web', express.static(join(__dirname, '../dist')));
+
+// Redirect root to /robot-dog-web/
+app.get('/', (req, res) => {
+    res.redirect('/robot-dog-web/');
+});
 
 // Maps Directory Listing
 app.use('/maps', async (req, res, next) => {
@@ -377,28 +415,41 @@ app.post('/api/maps/save', async (req, res) => {
         const description = fields.description || '';
         const fileItems = files.filter(f => f.fieldName === 'files');
 
+        console.log(`[SaveMap] Saving map to ${folderName}. Files: ${fileItems.map(f => f.filename).join(', ')}`);
+        if (fields.filesToCopy) {
+            console.log(`[SaveMap] Files to copy: ${fields.filesToCopy}`);
+        }
+
         if (!folderName || !mapName || fileItems.length === 0) return { success: false, error: 'Missing required fields' };
 
         const mapFolderPath = join(mapsDir, folderName);
         await mkdir(mapFolderPath, { recursive: true });
 
+        // 记录已上传的文件路径（相对于 mapFolderPath）
+        const uploadedPaths = new Set();
+
         for (const file of fileItems) {
             const ext = extname(file.filename).toLowerCase();
             const fileNameOnly = basename(file.filename);
             let targetPath;
+            let relativePath;
 
             if (['.pgm', '.yaml', '.yml', '.pcd'].includes(ext)) {
-                targetPath = join(mapFolderPath, 'map', fileNameOnly);
+                relativePath = join('map', fileNameOnly);
             } else if (ext === '.json' && fileNameOnly !== 'config.json') {
-                targetPath = join(mapFolderPath, 'queue', fileNameOnly);
+                relativePath = join('queue', fileNameOnly);
             } else {
                 if (fileNameOnly === 'config.json') {
-                    targetPath = join(mapFolderPath, fileNameOnly);
+                    relativePath = fileNameOnly;
                 } else {
-                    targetPath = join(mapFolderPath, 'map', fileNameOnly);
+                    relativePath = join('map', fileNameOnly);
                 }
             }
 
+            targetPath = join(mapFolderPath, relativePath);
+            uploadedPaths.add(relativePath);
+
+            console.log(`[SaveMap] Writing file: ${targetPath} (Size: ${file.data.length})`);
             await mkdir(dirname(targetPath), { recursive: true });
             await writeFile(targetPath, file.data);
         }
@@ -408,6 +459,26 @@ app.post('/api/maps/save', async (req, res) => {
                 const filesToCopy = JSON.parse(fields.filesToCopy);
                 for (const fileInfo of filesToCopy) {
                     try {
+                        // 检查是否会覆盖已上传的文件
+                        // fileInfo.targetPath 是相对路径，如 "queue/text.json"
+                        // 我们需要标准化路径分隔符以进行比较
+                        const normalizedTarget = fileInfo.targetPath.split('/').join(require('path').sep);
+
+                        // 检查 uploadedPaths 中是否存在该路径
+                        // 注意：uploadedPaths 中的路径使用了系统分隔符
+                        let isUploaded = false;
+                        for (const uploaded of uploadedPaths) {
+                            if (uploaded.endsWith(normalizedTarget)) {
+                                isUploaded = true;
+                                break;
+                            }
+                        }
+
+                        if (isUploaded) {
+                            console.log(`[SaveMap] Skipping copy for ${fileInfo.targetPath} as it was uploaded.`);
+                            continue;
+                        }
+
                         const sourcePath = join(mapsDir, fileInfo.path);
                         const targetPath = join(mapFolderPath, fileInfo.targetPath);
                         await mkdir(dirname(targetPath), { recursive: true });

@@ -1915,25 +1915,10 @@ export default defineConfig({
     port: 3000,
     host: true,
     proxy: {
-      '/api/detect': {
+      '/api': {
         target: 'https://ibl.zjypwy.com/cscec-robot-dog',
-        changeOrigin: true
-      },
-      '/api/streams': {
-        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
-        changeOrigin: true
-      },
-      '/api/reports': {
-        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
-        changeOrigin: true
-      },
-      '/api/history': {
-        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
-        changeOrigin: true
-      },
-      '/api/schedules': {
-        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
-        changeOrigin: true
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '/api')
       }
     }
   },
@@ -1959,5 +1944,6 @@ export default defineConfig({
   },
   define: {
     global: 'window'
-  }
+  },
+  base: '/robot-dog-web/'
 })
