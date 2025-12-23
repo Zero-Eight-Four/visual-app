@@ -197,7 +197,7 @@ class RosConnection {
     // 初始检查页面可见性
     if (typeof document !== 'undefined' && document.hidden) {
       this.heartbeatPaused = true
-      console.log('[Heartbeat] 页面不可见，初始状态为暂停')
+      console.debug('[Heartbeat] 页面不可见，初始状态为暂停')
     } else {
       this.heartbeatPaused = false
     }
@@ -315,7 +315,7 @@ class RosConnection {
       this.heartbeatPaused = true
       // 重置失败计数，避免在暂停期间累积失败
       this.heartbeatFailCount = 0
-      console.log('[Heartbeat] 心跳检测已暂停')
+      console.debug('[Heartbeat] 心跳检测已暂停')
     }
   }
 
@@ -327,7 +327,7 @@ class RosConnection {
       this.heartbeatPaused = false
       // 重置失败计数，重新开始检测
       this.heartbeatFailCount = 0
-      console.log('[Heartbeat] 心跳检测已恢复')
+      console.debug('[Heartbeat] 心跳检测已恢复')
     }
   }
 

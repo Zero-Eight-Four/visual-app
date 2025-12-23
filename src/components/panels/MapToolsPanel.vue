@@ -1643,10 +1643,10 @@ const handleDownloadFromRobot = async () => {
                 }))
         } catch (error) {
             console.warn('无法列出 map 目录:', error)
-            ElMessage.warning('无法访问机器狗的 map 目录')
+            // 目录可能不存在，不弹窗报错
         }
 
-        // 2. 列出机器狗 queues 目录的文件（包含大小信息）
+        // 2. 列出机器狗 queue 目录的文件（包含大小信息）
         let queueFiles: Array<{ name: string; path: string; size: number }> = []
         try {
             const queueItems = await httpClient.listDirectory('queues')
@@ -1660,11 +1660,11 @@ const handleDownloadFromRobot = async () => {
                 }))
         } catch (error) {
             console.warn('无法列出 queues 目录:', error)
-            ElMessage.warning('无法访问机器狗的 queues 目录')
+            // 目录可能不存在，不弹窗报错
         }
 
         if (mapFiles.length === 0 && queueFiles.length === 0) {
-            ElMessage.warning('机器狗上没有找到地图文件')
+            ElMessage.warning('机器狗上没有找到地图文件 (map/queue 目录为空或无法访问)')
             return
         }
 

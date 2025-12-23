@@ -484,17 +484,30 @@ export function createHttpFileTransferClient(
   wsUrl: string,
   httpPort: number = 8080
 ): HttpFileTransferClient {
-  // 如果是生产环境，使用 API_BASE_URL 的根路径作为 baseUrl
-  if (import.meta.env.PROD) {
-    // 假设 API_BASE_URL 是 https://ibl.zjypwy.com/cscec-robot-dog/api
-    // 我们需要 https://ibl.zjypwy.com/cscec-robot-dog
-    const baseUrl = API_BASE_URL.replace(/\/api$/, '')
-    return new HttpFileTransferClient({
-      baseUrl,
-      apiPrefix: `${API_BASE_URL}/files`
-    })
+  // 尝试检测是否需要使用 Nginx 代理来避免 CORS 问题
+  try {
+    if (typeof window !== 'undefined') {
+      const targetUrl = new URL(wsUrl.replace('ws', 'http')) // 处理 ws/wss
+      const currentHostname = window.location.hostname
+
+      // 如果目标主机与当前页面主机相同（例如都是 8.148.247.53）
+      // 且端口不同（页面是 80/443，目标是 9090/8080），则会触发 CORS
+      // 此时优先使用 Nginx 代理路径 /robot-files/
+      if (targetUrl.hostname === currentHostname) {
+        console.log('[Debug] Detected same-origin target, using /robot-files proxy to avoid CORS')
+        return new HttpFileTransferClient({
+          baseUrl: '/robot-files', // 使用相对路径，且不带末尾斜杠
+          apiPrefix: '/api/files'
+        })
+      }
+    }
+  } catch (e) {
+    console.warn('[Debug] Failed to check origin for proxy:', e)
   }
 
   const baseUrl = extractHttpUrlFromWsUrl(wsUrl, httpPort)
-  return new HttpFileTransferClient({ baseUrl })
+  return new HttpFileTransferClient({
+    baseUrl,
+    apiPrefix: '/api/files' // 机器狗 API 前缀
+  })
 }
