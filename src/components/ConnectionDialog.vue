@@ -37,7 +37,7 @@
     <el-dialog v-model="newConnectionDialogVisible" title="添加新连接" width="400px" :close-on-click-modal="false">
         <el-form label-width="80px">
             <el-form-item label="连接地址">
-                <el-input v-model="newConnectionForm.url" placeholder="ws://192.168.1.100:9090"
+                <el-input v-model="newConnectionForm.url" placeholder="ws://192.168.1.100:9090 或 wss://..."
                     @keyup.enter="saveNewConnection" />
             </el-form-item>
             <el-form-item label="连接名称">
@@ -255,7 +255,7 @@ const saveNewConnection = () => {
 
     // 验证URL格式
     if (!isValidWebSocketUrl(newConnectionForm.value.url)) {
-        ElMessage.warning('请输入有效的WebSocket地址，例如: ws://192.168.1.100:9090')
+        ElMessage.warning('请输入有效的WebSocket地址，例如: ws://192.168.1.100:9090 或 wss://...')
         return
     }
 
@@ -352,7 +352,14 @@ const handleConnect = async () => {
         })
 
         // 显示更详细的错误信息
-        const ip = urlValue.replace('ws://', '').split(':')[0]
+        let ip = ''
+        try {
+            const urlObj = new URL(urlValue)
+            ip = urlObj.hostname
+        } catch {
+            ip = urlValue.replace(/^wss?:\/\//, '').split(':')[0]
+        }
+        
         let userMessage = ''
 
         if (errorMessage.includes('无法加载') || errorMessage.includes('网络连接失败')) {

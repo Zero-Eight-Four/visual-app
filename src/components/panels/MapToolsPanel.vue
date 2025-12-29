@@ -1866,7 +1866,7 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
         try {
             const url = new URL(wsUrl)
             if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1') {
-                throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址（例如：ws://192.168.1.100:9090）')
+                throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址（例如：ws://192.168.1.100:9090 或 wss://...）')
         }
     } catch (error) {
             if (error instanceof Error && error.message.includes('localhost')) {

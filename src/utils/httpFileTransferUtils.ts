@@ -453,13 +453,14 @@ export function extractHttpUrlFromWsUrl(wsUrl: string, httpPort: number = 8080):
   try {
     const url = new URL(wsUrl)
     const hostname = url.hostname
+    const protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
 
     // 如果 hostname 是 localhost 或 127.0.0.1，抛出错误
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
       throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址')
     }
 
-    return `http://${hostname}:${httpPort}`
+    return `${protocol}//${hostname}:${httpPort}`
   } catch (error) {
     // 如果解析失败，尝试简单替换
     let httpUrl = wsUrl
@@ -487,7 +488,22 @@ export function createHttpFileTransferClient(
   // 尝试检测是否需要使用 Nginx 代理来避免 CORS 问题
   try {
     if (typeof window !== 'undefined') {
-      const targetUrl = new URL(wsUrl.replace('ws', 'http')) // 处理 ws/wss
+      let targetUrlStr = wsUrl
+        .replace('ws://', 'http://')
+        .replace('wss://', 'https://')
+
+      // 如果没有替换成功（可能是其他格式），尝试用 URL 解析
+      if (targetUrlStr === wsUrl) {
+        try {
+          const u = new URL(wsUrl);
+          u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
+          targetUrlStr = u.toString();
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      const targetUrl = new URL(targetUrlStr)
       const currentHostname = window.location.hostname
 
       // 如果目标主机与当前页面主机相同（例如都是 8.148.247.53）
