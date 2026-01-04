@@ -456,9 +456,9 @@ export function extractHttpUrlFromWsUrl(wsUrl: string, httpPort: number = 8080):
     const protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
 
     // 如果 hostname 是 localhost 或 127.0.0.1，抛出错误
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-      throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址')
-    }
+    // if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+    //   throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址')
+    // }
 
     return `${protocol}//${hostname}:${httpPort}`
   } catch (error) {
@@ -469,9 +469,9 @@ export function extractHttpUrlFromWsUrl(wsUrl: string, httpPort: number = 8080):
       .replace(/:\d+/, `:${httpPort}`)
 
     // 检查是否包含 localhost
-    if (httpUrl.includes('localhost') || httpUrl.includes('127.0.0.1')) {
-      throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址')
-    }
+    // if (httpUrl.includes('localhost') || httpUrl.includes('127.0.0.1')) {
+    //   throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址')
+    // }
 
     return httpUrl
   }
@@ -486,6 +486,9 @@ export function createHttpFileTransferClient(
   httpPort: number = 8080
 ): HttpFileTransferClient {
   // 尝试检测是否需要使用 Nginx 代理来避免 CORS 问题
+  // 注意：如果 Nginx 配置不正确（例如 /robot-files/ 代理到了 ROS 端口），会导致 WebSocket 握手超时错误
+  // 因此这里暂时禁用自动代理检测，优先使用直连。如果遇到 CORS 问题，请检查服务端 CORS 配置或 Nginx 配置。
+  /*
   try {
     if (typeof window !== 'undefined') {
       let targetUrlStr = wsUrl
@@ -520,6 +523,7 @@ export function createHttpFileTransferClient(
   } catch (e) {
     console.warn('[Debug] Failed to check origin for proxy:', e)
   }
+  */
 
   const baseUrl = extractHttpUrlFromWsUrl(wsUrl, httpPort)
   return new HttpFileTransferClient({

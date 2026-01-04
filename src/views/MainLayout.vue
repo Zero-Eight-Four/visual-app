@@ -36,12 +36,54 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted, h } from 'vue'
+import { ElNotification } from 'element-plus'
 import ConnectionStatus from '@/components/ConnectionStatus.vue'
 import TopicSelector from '@/components/TopicSelector.vue'
 import ThreeDViewer from '@/components/ThreeDViewer.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import StateInfo from '@/components/StateInfo.vue'
 import TopicPublisher from '@/components/TopicPublisher.vue'
+
+onMounted(() => {
+    const eventSource = new EventSource('/api/events')
+    
+    eventSource.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data)
+            // Ignore initial connection message
+            if (data.type === 'connected') return
+
+            // Construct message content (support image)
+            const messageContent = data.imageUrl ? h('div', null, [
+                h('img', { 
+                    src: data.imageUrl, 
+                    style: 'width: 100%; max-height: 200px; object-fit: contain; margin-bottom: 8px; border-radius: 4px; display: block;' 
+                }),
+                h('div', { style: 'word-break: break-all;' }, data.message || '')
+            ]) : (data.message || JSON.stringify(data))
+
+            ElNotification({
+                title: data.title || '系统通知',
+                message: messageContent,
+                type: data.type || 'info',
+                duration: data.duration || 4500,
+                position: 'top-right'
+            })
+        } catch (e) {
+            console.error('Failed to parse notification:', e)
+        }
+    }
+
+    eventSource.onerror = (error) => {
+        console.error('SSE Error:', error)
+        // Do not close, let EventSource attempt to reconnect
+    }
+
+    onUnmounted(() => {
+        eventSource.close()
+    })
+})
 </script>
 
 <style scoped>

@@ -1924,7 +1924,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: false,
+    sourcemap: true,
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {

@@ -113,6 +113,18 @@
                                     @click="publishPtzCommand('zoom_in')" title="放大" />
                             </div>
                         </div>
+                        
+                        <div class="control-group">
+                            <span class="control-label">旋转</span>
+                            <div class="control-buttons">
+                                <el-button class="ptz-btn" :icon="RefreshLeft" circle size="small"
+                                    @click="publishPtzCommand('spin_left')" title="持续左转" />
+                                <el-button class="ptz-btn" :icon="VideoPause" circle size="small"
+                                    @click="publishPtzCommand('stop')" title="停止" />
+                                <el-button class="ptz-btn" :icon="RefreshRight" circle size="small"
+                                    @click="publishPtzCommand('spin_right')" title="持续右转" />
+                            </div>
+                        </div>
     
                     </div>
                 </div>
@@ -240,7 +252,7 @@
 
 <script setup lang="ts">
 import { API_BASE_URL } from '@/config'
-import { ref, computed, watch, inject, onUnmounted } from 'vue'
+import { ref, computed, watch, inject, onUnmounted, onMounted } from 'vue'
 import {
     ElForm,
     ElFormItem,
@@ -271,7 +283,9 @@ import {
     Position,
     Edit,
     Download,
-    Delete
+    Delete,
+    RefreshLeft,
+    RefreshRight
 } from '@element-plus/icons-vue'
 import { useImageSettingsStore } from '@/stores/imageSettings'
 import { useRosStore } from '@/stores/ros'
@@ -300,9 +314,152 @@ const handleTopicChange = (value: string) => {
 // 同步 store 变化
 watch(() => settingsStore.selectedTopic, (val) => { selectedTopic.value = val })
 
+// 自动采集任务相关
+const isAutoCapturing = ref(false)
+
+const handleTaskStatusMessage = async (message: any) => {
+    if (isAutoCapturing.value) return // 防止并发任务
+    
+    const taskId = message.data
+    console.log(`Received task status: ${taskId}`)
+    
+    // 生成文件夹名称: YYYYMMDDHHmmss_taskId
+    const now = new Date()
+    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+    const folderName = `${timestamp}_${taskId}`
+    
+    startAutoCapture(folderName)
+}
+
+const startAutoCapture = async (folderName: string) => {
+    isAutoCapturing.value = true
+    ElMessage.info(`开始自动采集任务: ${folderName}`)
+    
+    // 发送 stand 指令
+    try {
+        await rosConnection.publish('/stand_control', 'std_msgs/String', { data: 'stand' })
+    } catch (e) {
+        console.error('Failed to publish stand message:', e)
+    }
+
+    // 1. 开始旋转
+    await publishPtzCommand('spin_right')
+    
+    // 2. 采集循环
+    const captureInterval = 500 // 500ms 采集一次
+    const duration = 8000 // 8秒旋转一周 (根据实际情况调整)
+    const startTime = Date.now()
+    let imageCount = 0
+    
+    const captureTimer = setInterval(async () => {
+        // 检查是否超时
+        if (Date.now() - startTime > duration) {
+            clearInterval(captureTimer)
+            await stopAutoCapture()
+            return
+        }
+        
+        // 采集并上传
+        const canvas = getCanvas()
+        if (canvas) {
+            try {
+                canvas.toBlob(async (blob) => {
+                    if (blob) {
+                        const formData = new FormData()
+                        const fileName = `img_${Date.now()}.png`
+                        formData.append('image', blob, fileName)
+                        formData.append('folderName', folderName)
+                        
+                        try {
+                            await fetch(`${API_BASE_URL}/images/upload`, {
+                                method: 'POST',
+                                body: formData
+                            })
+                            imageCount++
+                        } catch (e) {
+                            console.error('Upload failed:', e)
+                        }
+                    }
+                }, 'image/png')
+            } catch (e) {
+                console.error('Capture failed:', e)
+            }
+        }
+    }, captureInterval)
+}
+
+const stopAutoCapture = async () => {
+    await publishPtzCommand('stop')
+    isAutoCapturing.value = false
+    
+    // 发布 continue 消息
+    try {
+        await rosConnection.publish('/goal_queue/continue', 'std_msgs/Empty', {})
+        console.log('Published to /goal_queue/continue')
+    } catch (e) {
+        console.error('Failed to publish continue message:', e)
+    }
+
+    // 发送 start 指令
+    try {
+        await rosConnection.publish('/stand_control', 'std_msgs/String', { data: 'start' })
+    } catch (e) {
+        console.error('Failed to publish start message:', e)
+    }
+
+    ElMessage.success('自动采集任务完成')
+}
+
+// 订阅任务状态话题
+const subscribeToTaskStatus = async () => {
+    if (!rosConnection.isConnected()) return
+
+    try {
+        await rosConnection.subscribe({
+            topic: '/goal_queue/task_status',
+            messageType: 'std_msgs/Int32',
+            callback: handleTaskStatusMessage
+        })
+    } catch (error) {
+        console.error('Failed to subscribe to task status:', error)
+    }
+}
+
+// 监听连接状态，重新订阅
+watch(() => rosStore.isConnected, (connected) => {
+    if (connected) {
+        subscribeToTaskStatus()
+    }
+})
+
+onMounted(() => {
+    if (rosStore.isConnected) {
+        subscribeToTaskStatus()
+    }
+})
+
 // PTZ 控制相关
 const publishPtzCommand = async (command: string) => {
-    const topic = `/siyi_camera_control/${command}`
+    // 映射命令到新的话题
+    const topicMap: Record<string, string> = {
+        'rotate_up': '/camera/ptz_up',
+        'rotate_down': '/camera/ptz_down',
+        'rotate_left': '/camera/ptz_left',
+        'rotate_right': '/camera/ptz_right',
+        'zoom_in': '/camera/ptz_zoom_in',
+        'zoom_out': '/camera/ptz_zoom_out',
+        'center': '/camera/ptz_stop',
+        'stop': '/camera/ptz_stop',
+        'spin_left': '/camera/ptz_spin_left',
+        'spin_right': '/camera/ptz_spin_right'
+    }
+
+    const topic = topicMap[command]
+
+    if (!topic) {
+        console.warn(`Unknown PTZ command: ${command}`)
+        return
+    }
 
     if (!rosConnection.isConnected()) {
         return

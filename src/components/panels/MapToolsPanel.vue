@@ -2449,7 +2449,9 @@ const loadMapForEdit = async (mapPath: string) => {
                      yamlUrl = `${baseUrl}${yamlUrl}`
                 }
 
-                const yamlRes = await fetch(yamlUrl)
+                // 添加时间戳防止缓存
+                const fetchUrl = yamlUrl.includes('?') ? `${yamlUrl}&t=${Date.now()}` : `${yamlUrl}?t=${Date.now()}`
+                const yamlRes = await fetch(fetchUrl)
                 if (yamlRes.ok) {
                     const yamlText = await yamlRes.text()
                     // 简单解析 YAML

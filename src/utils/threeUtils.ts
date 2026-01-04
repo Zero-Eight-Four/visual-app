@@ -125,7 +125,7 @@ export function createTextSprite(text: string, color = '#ffffff', fontSize = 96)
   context.font = `bold ${fontSize}px Arial` // 使用粗体使文字更清晰
   context.textAlign = 'center'
   context.textBaseline = 'middle'
-  
+
   // 添加文本描边以增强可见性
   context.strokeStyle = '#000000'
   context.lineWidth = 4
@@ -343,11 +343,15 @@ export function updateMapPlane(
       width: number
       height: number
       resolution: number
+      origin: {
+        position: { x: number; y: number; z: number }
+        orientation: { x: number; y: number; z: number; w: number }
+      }
     }
     data: number[]
   }
 ): void {
-  const { width, height } = mapData.info
+  const { width, height, resolution, origin } = mapData.info
 
   const canvas = document.createElement('canvas')
   canvas.width = width
@@ -398,4 +402,35 @@ export function updateMapPlane(
   }
   material.map = texture
   material.needsUpdate = true
+
+  // 更新几何体（如果尺寸发生变化）
+  const newWidth = width * resolution
+  const newHeight = height * resolution
+  const geometry = mesh.geometry as THREE.PlaneGeometry
+
+  // 检查是否需要重建几何体
+  if (Math.abs(geometry.parameters.width - newWidth) > 0.001 ||
+    Math.abs(geometry.parameters.height - newHeight) > 0.001) {
+    mesh.geometry.dispose()
+    mesh.geometry = new THREE.PlaneGeometry(newWidth, newHeight)
+  }
+
+  // 更新位置 (XY平面,Z轴向上)
+  mesh.position.set(
+    origin.position.x + newWidth / 2,
+    origin.position.y + newHeight / 2,
+    0.0 // 地图在xy平面，z=0
+  )
+
+  // 更新方向
+  if (origin.orientation) {
+    mesh.quaternion.set(
+      origin.orientation.x,
+      origin.orientation.y,
+      origin.orientation.z,
+      origin.orientation.w
+    )
+  } else {
+    mesh.quaternion.set(0, 0, 0, 1)
+  }
 }

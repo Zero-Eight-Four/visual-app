@@ -391,6 +391,80 @@
                 </div>
             </div>
         </el-dialog>
+
+        <!-- 天气信息对话框 -->
+        <el-dialog v-model="showWeatherDialog" title="当前天气" width="400px">
+            <div v-loading="weatherLoading" class="weather-content">
+                <div v-if="weatherError" class="weather-error">
+                    <el-icon color="#F56C6C"><Warning /></el-icon>
+                    <span>{{ weatherError }}</span>
+                </div>
+                <div v-else-if="weatherData" class="weather-info">
+                    <div class="weather-main">
+                        <div class="weather-temp">{{ weatherData.current_condition[0].temp_C }}°C</div>
+                        <div class="weather-desc">{{ weatherDesc }}</div>
+                    </div>
+                    <div class="weather-details">
+                        <div class="detail-item">
+                            <span class="label">湿度:</span>
+                            <span class="value">{{ weatherData.current_condition[0].humidity }}%</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">风速:</span>
+                            <span class="value">{{ weatherData.current_condition[0].windspeedKmph }} km/h</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">位置:</span>
+                            <span class="value">{{ displayCity }}</span>
+                        </div>
+                    </div>
+                    
+                    <div v-if="rainInfo" class="weather-rain-info" :class="{ 'is-raining': rainInfo.isRaining }">
+                        <div class="rain-status">
+                            <el-icon :size="20" style="margin-right: 8px;">
+                                <Pouring v-if="rainInfo.isRaining || rainInfo.maxChance > 50" />
+                                <Sunny v-else />
+                            </el-icon>
+                            <span>{{ rainInfo.isRaining ? '当前正在降雨' : '当前无降雨' }}</span>
+                        </div>
+                        <div class="rain-chance">
+                            最高降雨概率: {{ rainInfo.maxChance }}%
+                        </div>
+                    </div>
+
+                    <div v-if="rainInfo && rainInfo.hourlyForecast.length > 0" class="hourly-forecast">
+                        <div class="forecast-title">未来几小时预报</div>
+                        <div class="forecast-list">
+                            <div v-for="(item, index) in rainInfo.hourlyForecast" :key="index" class="forecast-item">
+                                <div class="forecast-time">{{ item.time }}</div>
+                                <div class="forecast-desc">{{ item.desc }}</div>
+                                <div class="forecast-chance" :class="{ 'high-chance': parseInt(item.chance) > 50 }">
+                                    <el-icon v-if="parseInt(item.chance) > 0"><Pouring /></el-icon>
+                                    {{ item.chance }}%
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="weather-placeholder">
+                    正在获取天气信息...
+                </div>
+                
+                <div class="city-input" style="margin-top: 20px;">
+                    <el-input v-model="weatherCity" placeholder="输入城市拼音 (如 Beijing)" @keyup.enter="fetchWeather">
+                        <template #append>
+                            <el-button :icon="Refresh" @click="fetchWeather" />
+                        </template>
+                    </el-input>
+                </div>
+            </div>
+            <template #footer>
+                <el-button @click="showWeatherDialog = false">取消</el-button>
+                <el-button type="primary" @click="confirmWeatherAndStart" :disabled="weatherLoading">
+                    确认并加载地图
+                </el-button>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
@@ -429,16 +503,75 @@ import {
     SwitchButton,
     DArrowLeft,
     DArrowRight,
-    Warning
+    Warning,
+    Pouring,
+    Sunny
 } from '@element-plus/icons-vue'
 import { rosConnection } from '@/services/rosConnection'
 import { use3DSettingsStore } from '@/stores/threeDSettings'
 import { useRosStore } from '@/stores/ros'
 import type { PublishClickType } from '@/utils/PublishClickTool'
+import { API_BASE_URL } from '@/config'
 
 const settingsStore = use3DSettingsStore()
 const rosStore = useRosStore()
 const queueName = ref('')
+
+// Inject ImagePanel reference
+const imagePanelRef = inject<any>('imagePanelRef', null)
+
+// Image Capture Logic
+const captureTimer = ref<number | null>(null)
+
+const startImageCapture = () => {
+    if (captureTimer.value) return
+
+    console.log('Starting image capture...')
+    captureTimer.value = window.setInterval(() => {
+        captureAndUploadImage()
+    }, 2000)
+}
+
+const stopImageCapture = () => {
+    if (captureTimer.value) {
+        console.log('Stopping image capture...')
+        clearInterval(captureTimer.value)
+        captureTimer.value = null
+    }
+}
+
+const captureAndUploadImage = () => {
+    if (!imagePanelRef?.value) {
+        console.warn('ImagePanel ref not found')
+        return
+    }
+
+    const canvas = imagePanelRef.value.imageCanvas as HTMLCanvasElement | null
+    if (!canvas || canvas.width === 0 || canvas.height === 0) {
+        // console.warn('Canvas not ready')
+        return
+    }
+
+    canvas.toBlob(async (blob) => {
+        if (blob) {
+            const formData = new FormData()
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+            const fileName = `img_${timestamp}.jpg`
+            formData.append('image', blob, fileName)
+            formData.append('folderName', 'check')
+
+            try {
+                await fetch(`${API_BASE_URL}/images/upload`, {
+                    method: 'POST',
+                    body: formData
+                })
+                // console.log('Image uploaded:', fileName)
+            } catch (e) {
+                console.error('Image upload failed:', e)
+            }
+        }
+    }, 'image/jpeg', 0.8)
+}
 
 // 电池安全设置
 const savedMinBattery = localStorage.getItem('minBatteryLevel')
@@ -489,6 +622,122 @@ const recordStatus = ref(1)
 // 机器狗控制
 const showControlDialog = ref(false)
 const moveInterval = ref<number | null>(null)
+
+// 天气 API 相关
+const showWeatherDialog = ref(false)
+const weatherCity = ref('武汉光谷') // 默认城市
+const weatherData = ref<any>(null)
+const weatherLoading = ref(false)
+const weatherError = ref('')
+
+const displayCity = computed(() => {
+    const city = weatherCity.value
+    if (city.toLowerCase() === 'wuhan') return '武汉'
+    return city
+})
+
+const rainInfo = computed(() => {
+    if (!weatherData.value) return null
+    
+    const current = weatherData.value.current_condition[0]
+    const isRaining = parseFloat(current.precipMM) > 0
+    
+    let maxChance = 0
+    let hourlyForecast: any[] = []
+
+    if (weatherData.value.weather && weatherData.value.weather[0] && weatherData.value.weather[0].hourly) {
+        const hourly = weatherData.value.weather[0].hourly
+        // Calculate max rain chance
+        maxChance = Math.max(...hourly.map((h: any) => parseInt(h.chanceofrain)))
+        
+        // Get next few hours forecast
+        const currentHour = new Date().getHours() * 100
+        hourlyForecast = hourly.filter((h: any) => parseInt(h.time) >= currentHour).slice(0, 4).map((h: any) => ({
+            time: h.time.padStart(4, '0').replace(/(\d{2})(\d{2})/, '$1:$2'),
+            chance: h.chanceofrain,
+            desc: h.lang_zh ? h.lang_zh[0].value : (h.weatherDesc ? h.weatherDesc[0].value : '')
+        }))
+        
+        // If no future hours left today (e.g. late night), show tomorrow's first few
+        if (hourlyForecast.length < 3 && weatherData.value.weather[1]) {
+             const tomorrowHourly = weatherData.value.weather[1].hourly
+             const needed = 4 - hourlyForecast.length
+             const nextDay = tomorrowHourly.slice(0, needed).map((h: any) => ({
+                time: '明天 ' + h.time.padStart(4, '0').replace(/(\d{2})(\d{2})/, '$1:$2'),
+                chance: h.chanceofrain,
+                desc: h.lang_zh ? h.lang_zh[0].value : (h.weatherDesc ? h.weatherDesc[0].value : '')
+            }))
+            hourlyForecast = [...hourlyForecast, ...nextDay]
+        }
+    }
+    
+    return {
+        isRaining,
+        precipMM: current.precipMM,
+        maxChance,
+        hourlyForecast
+    }
+})
+
+const weatherDesc = computed(() => {
+    if (!weatherData.value) return ''
+    const current = weatherData.value.current_condition[0]
+    return current.lang_zh ? current.lang_zh[0].value : current.weatherDesc[0].value
+})
+
+const fetchWeather = async () => {
+    weatherLoading.value = true
+    weatherError.value = ''
+    weatherData.value = null
+    try {
+        // Use local backend proxy with caching
+        const response = await fetch(`${API_BASE_URL}/weather?city=${weatherCity.value}`)
+        if (!response.ok) {
+            throw new Error('获取天气失败')
+        }
+        const data = await response.json()
+        weatherData.value = data
+    } catch (error) {
+        weatherError.value = error instanceof Error ? error.message : '未知错误'
+    } finally {
+        weatherLoading.value = false
+    }
+}
+
+const handleToggleNavigation = () => {
+    if (isNavigationRunning.value) {
+        // 如果正在运行，直接停止
+        toggleNavigation()
+    } else {
+        // 如果未运行，先显示天气对话框
+        showWeatherDialog.value = true
+        fetchWeather() // 自动获取默认城市天气
+    }
+}
+
+const confirmWeatherAndStart = () => {
+    showWeatherDialog.value = false
+    toggleNavigation()
+}
+
+// 监听控制对话框状态，打开时暂停任务，关闭时继续任务
+watch(showControlDialog, async (val) => {
+    if (!isConnected.value) return
+
+    try {
+        if (val) {
+            // 打开对话框，发送暂停指令
+            await rosConnection.publish('/goal_queue/pause', 'std_msgs/Empty', {})
+            ElMessage.info('已暂停任务运行，进入手动控制模式')
+        } else {
+            // 关闭对话框，发送继续指令
+            await rosConnection.publish('/goal_queue/continue', 'std_msgs/Empty', {})
+            ElMessage.success('已恢复任务运行')
+        }
+    } catch (error) {
+        console.error('Failed to publish pause/continue command:', error)
+    }
+})
 
 const publishTwist = async (twist: any) => {
     try {
@@ -628,6 +877,13 @@ const publishCommand = async (topic: string) => {
         } else {
             await rosConnection.publish(topic, 'std_msgs/Empty', {})
             ElMessage.success('命令已发送')
+
+            // Handle Image Capture
+            if (topic === '/goal_queue/start') {
+                startImageCapture()
+            } else if (topic === '/goal_queue/stop') {
+                stopImageCapture()
+            }
         }
     } catch (error) {
         console.error('Failed to publish command:', error)
@@ -636,7 +892,7 @@ const publishCommand = async (topic: string) => {
 }
 
 // 处理导航启动/停止切换
-const handleToggleNavigation = async () => {
+const toggleNavigation = async () => {
     if (!rosConnection.isConnected()) {
         ElMessage.warning('请先连接到机器狗')
         return
@@ -1366,6 +1622,10 @@ const handlePosePublished = async (pose: any) => {
         }
     }
 }
+// Clean up timer on unmount
+onUnmounted(() => {
+    stopImageCapture()
+})
 </script>
 
 <style scoped>
@@ -1492,5 +1752,140 @@ const handlePosePublished = async (pose: any) => {
     display: flex;
     align-items: center;
     gap: 4px;
+}
+
+.weather-content {
+    padding: 10px;
+    text-align: center;
+}
+
+.weather-main {
+    margin-bottom: 20px;
+}
+
+.weather-temp {
+    font-size: 48px;
+    font-weight: bold;
+    color: #409EFF;
+}
+
+.weather-desc {
+    font-size: 18px;
+    color: #606266;
+    margin-top: 5px;
+}
+
+.weather-details {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    background-color: #f5f7fa;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.detail-item .label {
+    font-size: 12px;
+    color: #909399;
+}
+
+.detail-item .value {
+    font-size: 14px;
+    font-weight: 500;
+    color: #303133;
+    margin-top: 4px;
+}
+
+.weather-error {
+    color: #F56C6C;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px;
+}
+
+.weather-rain-info {
+    margin-top: 15px;
+    padding: 10px;
+    background-color: #f0f9eb;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #67c23a;
+}
+
+.weather-rain-info.is-raining {
+    background-color: #fef0f0;
+    color: #f56c6c;
+}
+
+.rain-status {
+    display: flex;
+    align-items: center;
+    font-weight: bold;
+}
+
+.rain-chance {
+    font-size: 13px;
+}
+
+.hourly-forecast {
+    margin-top: 15px;
+    background-color: #f5f7fa;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.forecast-title {
+    font-size: 12px;
+    color: #909399;
+    margin-bottom: 8px;
+    text-align: left;
+}
+
+.forecast-list {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+}
+
+.forecast-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-size: 12px;
+    flex: 1;
+}
+
+.forecast-time {
+    color: #606266;
+    margin-bottom: 2px;
+}
+
+.forecast-desc {
+    color: #303133;
+    font-weight: 500;
+    margin-bottom: 2px;
+    font-size: 11px;
+}
+
+.forecast-chance {
+    color: #909399;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.forecast-chance.high-chance {
+    color: #409EFF;
+    font-weight: bold;
 }
 </style>

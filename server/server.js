@@ -2,7 +2,7 @@ import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname, basename } from 'path';
-import { readdir, writeFile, mkdir, rm, readFile, rename, copyFile, stat, access } from 'fs/promises';
+import { readdir, writeFile, mkdir, rm, readFile, rename, copyFile, stat, access, unlink } from 'fs/promises';
 import { createReadStream, createWriteStream, statSync, constants } from 'fs';
 import http from 'http';
 import https from 'https';
@@ -64,6 +64,69 @@ app.use('/maps', async (req, res, next) => {
 
 // Serve static files for maps
 app.use('/maps', express.static(join(__dirname, '../maps')));
+// Serve static files for images
+app.use('/images', express.static(join(__dirname, '../image')));
+
+// Weather Cache
+const weatherCache = {
+    data: null,
+    timestamp: 0,
+    city: 'Wuhan' // Default city
+};
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+app.get('/api/weather', (req, res) => {
+    const city = req.query.city || 'Wuhan';
+    const now = Date.now();
+
+    // Check cache
+    if (weatherCache.data &&
+        weatherCache.city === city &&
+        (now - weatherCache.timestamp < CACHE_DURATION)) {
+        console.log('Serving weather from cache');
+        return res.json(weatherCache.data);
+    }
+
+    console.log(`Fetching weather for ${city} from wttr.in`);
+    const url = `https://wttr.in/${encodeURIComponent(city)}?format=j1&lang=zh`;
+
+    https.get(url, (response) => {
+        let data = '';
+
+        response.on('data', (chunk) => {
+            data += chunk;
+        });
+
+        response.on('end', () => {
+            try {
+                const jsonData = JSON.parse(data);
+                // Update cache
+                weatherCache.data = jsonData;
+                weatherCache.timestamp = now;
+                weatherCache.city = city;
+
+                res.json(jsonData);
+            } catch (e) {
+                console.error('Error parsing weather data:', e);
+                // If parse fails but we have old cache, serve it as fallback
+                if (weatherCache.data && weatherCache.city === city) {
+                    console.log('Serving stale weather cache due to parse error');
+                    return res.json(weatherCache.data);
+                }
+                res.status(500).json({ error: 'Failed to parse weather data' });
+            }
+        });
+
+    }).on('error', (err) => {
+        console.error('Error fetching weather:', err);
+        // If fetch fails but we have old cache, serve it as fallback
+        if (weatherCache.data && weatherCache.city === city) {
+            console.log('Serving stale weather cache due to fetch error');
+            return res.json(weatherCache.data);
+        }
+        res.status(500).json({ error: 'Failed to fetch weather data' });
+    });
+});
 
 // 优化的流式处理：使用固定大小缓冲区，避免内存溢出
 async function processMultipartStream(req, res, processor) {
@@ -553,6 +616,50 @@ app.post('/api/videos/upload', async (req, res) => {
 
         await writeFile(join(dateDir, safeFileName), fileData);
         return { success: true, fileName: safeFileName, folder: dateFolder };
+    });
+});
+
+app.post('/api/images/upload', async (req, res) => {
+    await processMultipartStream(req, res, async (fields, files) => {
+        const imagesDir = join(__dirname, '../image');
+        let fileName = '', fileData = null;
+        const folderName = fields.folderName || 'default';
+
+        for (const file of files) {
+            if (file.fieldName === 'image') {
+                fileName = file.filename;
+                fileData = file.data;
+                break;
+            }
+        }
+        if (!fileName || !fileData) throw new Error('No image file provided');
+
+        // Validate folder name to prevent path traversal
+        const safeFolderName = folderName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const targetDir = join(imagesDir, safeFolderName);
+        await mkdir(targetDir, { recursive: true });
+
+        const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        await writeFile(join(targetDir, safeFileName), fileData);
+
+        // If folder is 'check', manage image count
+        if (safeFolderName === 'check') {
+            try {
+                const files = await readdir(targetDir);
+                const imageFiles = files.filter(f => f.startsWith('img_'));
+                if (imageFiles.length > 100) {
+                    imageFiles.sort(); // Sort by name (timestamp)
+                    const filesToDelete = imageFiles.slice(0, imageFiles.length - 100);
+                    for (const file of filesToDelete) {
+                        await unlink(join(targetDir, file));
+                    }
+                }
+            } catch (err) {
+                console.error('Error managing check images:', err);
+            }
+        }
+
+        return { success: true, fileName: safeFileName, folder: safeFolderName };
     });
 });
 
@@ -1678,6 +1785,52 @@ app.delete('/api/schedules/:id', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
+});
+
+// SSE Clients
+let sseClients = [];
+
+// SSE Endpoint
+app.get('/api/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const clientId = Date.now();
+    const newClient = {
+        id: clientId,
+        res
+    };
+    sseClients.push(newClient);
+
+    // Send initial connection message
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+    req.on('close', () => {
+        sseClients = sseClients.filter(client => client.id !== clientId);
+    });
+});
+
+// Notification Endpoint
+app.post('/api/notification', (req, res) => {
+    const notification = req.body;
+
+    // Handle local file paths in imageUrl
+    if (notification.imageUrl && typeof notification.imageUrl === 'string') {
+        // Check if it's an absolute path pointing to the image directory
+        const imageDir = join(__dirname, '../image');
+        // Normalize paths to ensure consistent comparison
+        const normalizedPath = notification.imageUrl.split('\\').join('/');
+        const normalizedDir = imageDir.split('\\').join('/');
+
+        if (normalizedPath.startsWith(normalizedDir)) {
+            // Replace absolute path with relative URL
+            notification.imageUrl = '/images' + normalizedPath.substring(normalizedDir.length);
+        }
+    }
+
+
+    res.json({ success: true, count: sseClients.length });
 });
 
 // Proxy all other API requests to Python backend
