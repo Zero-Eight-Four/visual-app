@@ -322,16 +322,11 @@ const handleConnect = async () => {
             saveConnectionHistory(urlValue, extractNameFromUrl(urlValue))
         }
 
-        // 获取话题列表（添加超时处理）
-        try {
-            const topics = await Promise.race([
-                rosConnection.getTopics(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('获取话题列表超时')), 5000))
-            ]) as any[]
-            rosStore.setTopics(topics)
-        } catch (topicError) {
-            // 即使获取话题失败，连接也是成功的
-        }
+        // 获取话题列表 (后台异步获取)
+        rosStore.fetchTopics().catch(err => {
+            console.warn('Initial topic fetch incomplete:', err)
+        })
+
         visible.value = false
         emit('connected')
     } catch (error) {

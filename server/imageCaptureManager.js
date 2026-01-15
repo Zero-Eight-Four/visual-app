@@ -128,7 +128,7 @@ export class ImageCaptureManager {
             } catch (error) {
                 console.error('[ImageCaptureManager] Error saving image:', error);
             }
-        }, 2000);
+        }, 5000);
     }
 
     async manageImageCount(dir) {

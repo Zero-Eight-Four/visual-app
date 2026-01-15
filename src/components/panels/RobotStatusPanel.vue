@@ -519,7 +519,7 @@ const checkTemperatureProtection = (status: RobotStatus) => {
         isTempProtectionActive.value = true
         rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'stop' })
         ElMessage.error(`警告：电机温度过高 (${maxTemp.toFixed(1)}°C)，已发送停止指令！`)
-    } else if (maxTemp < 50 && isTempProtectionActive.value) {
+    } else if (maxTemp < 56 && isTempProtectionActive.value) {
         // 解除高温保护
         isTempProtectionActive.value = false
         rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'start' })

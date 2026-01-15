@@ -1,6 +1,17 @@
 <template>
     <div class="connection-status">
-        <div class="status-indicator" :class="statusClass">
+        <el-tooltip
+            v-if="isConnected && rosStore.topicFetchError"
+            :content="`连接正常，但话题获取失败: ${rosStore.topicFetchError}`"
+            placement="bottom"
+        >
+            <div class="status-indicator connected-warning">
+                <span class="dot"></span>
+                <span class="text">已连接 (异常)</span>
+                <el-icon class="warning-icon"><Warning /></el-icon>
+            </div>
+        </el-tooltip>
+        <div v-else class="status-indicator" :class="statusClass">
             <span class="dot"></span>
             <span class="text">{{ statusText }}</span>
         </div>
@@ -66,8 +77,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ElButton, ElSelect, ElOption, ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { ElButton, ElSelect, ElOption, ElMessage, ElTooltip, ElIcon } from 'element-plus'
+import { Plus, Warning } from '@element-plus/icons-vue'
 import { useRosStore } from '@/stores/ros'
 import { rosConnection } from '@/services/rosConnection'
 import ConnectionDialog from '@/components/ConnectionDialog.vue'
@@ -140,9 +151,12 @@ const handleConnect = async () => {
 
         rosStore.setConnectionState({ connected: true, connecting: false })
 
-        // 获取话题列表
-        const topics = await rosConnection.getTopics()
-        rosStore.setTopics(topics)
+        // 获取话题列表 (后台异步获取，不阻塞UI)
+        rosStore.fetchTopics().then(() => {
+            console.log('Initial topics fetched')
+        }).catch(err => {
+            console.warn('Initial topic fetch incomplete:', err)
+        })
 
         ElMessage.success('成功连接到ROS')
     } catch (error) {
@@ -167,6 +181,7 @@ const handleDialogConnected = () => {
 const handleDisconnect = () => {
     rosConnection.disconnect()
     rosStore.setConnectionState({ connected: false, connecting: false })
+    rosStore.setTopics([]) // 清空话题列表
     ElMessage.info('已断开连接')
 }
 
@@ -255,6 +270,25 @@ onUnmounted(() => {
 .text {
     font-size: 13px;
     color: #fff;
+}
+
+.connected-warning {
+    background-color: rgba(230, 162, 60, 0.2);
+    cursor: help;
+}
+
+.connected-warning .dot {
+    background-color: #67c23a; /* 连接仍然是绿色的 */
+}
+
+.connected-warning .text {
+    color: #e6a23c;
+}
+
+.warning-icon {
+    margin-left: 4px;
+    color: #e6a23c;
+    font-size: 14px;
 }
 
 @keyframes pulse {

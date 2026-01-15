@@ -407,48 +407,71 @@ class RosConnection {
 
   /**
    * 获取可用话题列表
+   * @param retries 重试次数，默认为2
+   * @param timeoutMs 单次超时时间（毫秒），默认为10000
    */
-  async getTopics(): Promise<RosTopic[]> {
+  async getTopics(retries = 2, timeoutMs = 10000): Promise<RosTopic[]> {
     if (!this.ros) {
       throw new Error('Not connected to ROS')
     }
 
-    return new Promise((resolve, reject) => {
-      // 设置超时，避免长时间等待
-      const timeout = setTimeout(() => {
-        reject(new Error('获取话题列表超时'))
-      }, 10000) // 10秒超时
+    let lastError: Error | null = null
 
+    for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        this.ros.getTopics(
-          (result: any) => {
+        return await new Promise<RosTopic[]>((resolve, reject) => {
+          // 设置超时，避免长时间等待
+          const timeout = setTimeout(() => {
+            reject(new Error(`获取话题列表超时 (尝试 ${attempt + 1}/${retries + 1})`))
+          }, timeoutMs)
+
+          try {
+            this.ros.getTopics(
+              (result: any) => {
+                clearTimeout(timeout)
+                if (result && result.topics && Array.isArray(result.topics)) {
+                  const topics: RosTopic[] = result.topics.map((name: string, index: number) => ({
+                    name,
+                    messageType: result.types && result.types[index] ? result.types[index] : 'unknown'
+                  }))
+                  resolve(topics)
+                } else {
+                  reject(new Error('无效的话题列表响应'))
+                }
+              },
+              (error: Error) => {
+                clearTimeout(timeout)
+                // 如果错误信息包含服务不存在，提供更友好的错误信息
+                const errorMsg = error.message || String(error)
+                if (errorMsg.includes('does not exist') || errorMsg.includes('Service')) {
+                  reject(new Error('ROS API 服务不可用，请确保 rosbridge 服务正常运行'))
+                } else {
+                  reject(error)
+                }
+              }
+            )
+          } catch (error) {
             clearTimeout(timeout)
-            if (result && result.topics && Array.isArray(result.topics)) {
-              const topics: RosTopic[] = result.topics.map((name: string, index: number) => ({
-                name,
-                messageType: result.types && result.types[index] ? result.types[index] : 'unknown'
-              }))
-              resolve(topics)
-            } else {
-              reject(new Error('无效的话题列表响应'))
-            }
-          },
-          (error: Error) => {
-            clearTimeout(timeout)
-            // 如果错误信息包含服务不存在，提供更友好的错误信息
-            const errorMsg = error.message || String(error)
-            if (errorMsg.includes('does not exist') || errorMsg.includes('Service')) {
-              reject(new Error('ROS API 服务不可用，请确保 rosbridge 服务正常运行'))
-            } else {
-              reject(error)
-            }
+            reject(error)
           }
-        )
+        })
       } catch (error) {
-        clearTimeout(timeout)
-        reject(error)
+        lastError = error instanceof Error ? error : new Error(String(error))
+        console.warn(`[RosConnection] 获取话题列表失败 (尝试 ${attempt + 1}/${retries + 1}):`, lastError.message)
+
+        // 如果是最后一次尝试，则抛出错误
+        if (attempt === retries) {
+          throw lastError
+        }
+
+        // 计算重试等待时间 (递增策略: 1s -> 2s -> 5s...)
+        const delay = attempt === 0 ? 1000 : (attempt === 1 ? 2000 : 5000)
+        console.log(`[RosConnection] 等待 ${delay}ms 后重试...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
       }
-    })
+    }
+
+    throw lastError || new Error('获取话题列表失败')
   }
 
   /**

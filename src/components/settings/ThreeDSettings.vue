@@ -377,6 +377,18 @@
                 </div>
 
                 <div class="control-group">
+                    <div class="control-label">模式切换</div>
+                    <div class="action-buttons">
+                        <el-button type="primary" plain style="flex: 1" @click="switchMode('lingdong')">
+                            灵动模式
+                        </el-button>
+                        <el-button type="info" plain style="flex: 1" @click="switchMode('classic')">
+                            经典模式
+                        </el-button>
+                    </div>
+                </div>
+
+                <div class="control-group">
                     <div class="control-label">姿态控制</div>
                     <div class="action-buttons">
                         <el-button type="success" style="flex: 1" @click="handleRobotAction('up')">
@@ -450,12 +462,15 @@
                     正在获取天气信息...
                 </div>
                 
-                <div class="city-input" style="margin-top: 20px;">
-                    <el-input v-model="weatherCity" placeholder="输入城市拼音 (如 Beijing)" @keyup.enter="fetchWeather">
+                <div class="city-input" style="margin-top: 20px; display: flex; gap: 10px;">
+                    <el-input v-model="weatherCity" placeholder="输入城市拼音 (如 Beijing)" @keyup.enter="fetchWeather" style="flex: 1">
                         <template #append>
                             <el-button :icon="Refresh" @click="fetchWeather" />
                         </template>
                     </el-input>
+                    <el-button type="success" plain @click="setDefaultCity" title="设为默认城市">
+                        设为默认
+                    </el-button>
                 </div>
             </div>
             <template #footer>
@@ -512,6 +527,7 @@ import { use3DSettingsStore } from '@/stores/threeDSettings'
 import { useRosStore } from '@/stores/ros'
 import type { PublishClickType } from '@/utils/PublishClickTool'
 import { API_BASE_URL } from '@/config'
+import { weatherService } from '@/services/weatherService'
 
 const settingsStore = use3DSettingsStore()
 const rosStore = useRosStore()
@@ -529,7 +545,7 @@ const startImageCapture = () => {
     console.log('Starting image capture...')
     captureTimer.value = window.setInterval(() => {
         captureAndUploadImage()
-    }, 2000)
+    }, 10000)
 }
 
 const stopImageCapture = () => {
@@ -625,10 +641,32 @@ const moveInterval = ref<number | null>(null)
 
 // 天气 API 相关
 const showWeatherDialog = ref(false)
-const weatherCity = ref('武汉光谷') // 默认城市
+const weatherCity = ref('武汉光谷') // 默认值，会从后端更新
 const weatherData = ref<any>(null)
 const weatherLoading = ref(false)
 const weatherError = ref('')
+
+// 初始化获取默认城市
+onMounted(async () => {
+    try {
+        const config = await weatherService.getConfig()
+        if (config.defaultCity) {
+            weatherCity.value = config.defaultCity
+        }
+    } catch (e) {
+        console.error('Failed to load weather config', e)
+    }
+})
+
+const setDefaultCity = async () => {
+    if (!weatherCity.value) return
+    try {
+        await weatherService.updateConfig(weatherCity.value)
+        ElMessage.success(`已将 ${weatherCity.value} 设为默认城市`)
+    } catch (e) {
+        ElMessage.error('设置默认城市失败')
+    }
+}
 
 const displayCity = computed(() => {
     const city = weatherCity.value
@@ -819,6 +857,19 @@ const handleRobotAction = async (action: string) => {
             console.error('Failed to publish action command:', error)
             ElMessage.error('发送指令失败')
         }
+    }
+}
+
+const switchMode = async (mode: string) => {
+    if (!isConnected.value) return
+
+    try {
+        await rosConnection.publish('/mode_switch', 'std_msgs/String', { data: mode })
+        const modeText = mode === 'lingdong' ? '灵动模式' : '经典模式'
+        ElMessage.success(`已切换到${modeText}`)
+    } catch (error) {
+        console.error('Failed to publish mode switch command:', error)
+        ElMessage.error('切换模式失败')
     }
 }
 
@@ -1336,6 +1387,31 @@ const subscribeToTaskStatus = async () => {
 }
 
 
+// 订阅命令话题（用于监听外部启动/停止命令）
+const subscribeToCommandTopics = async () => {
+    try {
+        await rosConnection.subscribe({
+            topic: '/goal_queue/start',
+            messageType: 'std_msgs/Empty',
+            callback: () => {
+                console.log('Received start command from topic')
+                startImageCapture()
+            }
+        })
+        
+        await rosConnection.subscribe({
+            topic: '/goal_queue/stop',
+            messageType: 'std_msgs/Empty',
+            callback: () => {
+                console.log('Received stop command from topic')
+                stopImageCapture()
+            }
+        })
+    } catch (error) {
+        console.error('Failed to subscribe to command topics:', error)
+    }
+}
+
 // 订阅 /goal_queue/list 话题获取队列列表
 let queueListSubscription: any = null
 
@@ -1475,6 +1551,7 @@ watch(() => rosStore.isConnected, (connected) => {
         setTimeout(() => {
             subscribeToNavigationStatus()
             subscribeToTaskStatus()
+            subscribeToCommandTopics()
             // 自动订阅队列列表（后端会定期发布，使用 latch=true）
             subscribeToQueueList()
         }, 1000)
@@ -1482,6 +1559,8 @@ watch(() => rosStore.isConnected, (connected) => {
         // 断开连接时取消订阅
         rosConnection.unsubscribe('/launch_trigger_status')
         rosConnection.unsubscribe('/goal_queue/list')
+        rosConnection.unsubscribe('/goal_queue/start')
+        rosConnection.unsubscribe('/goal_queue/stop')
         if (queueListSubscription) {
             queueListSubscription = null
         }
@@ -1508,6 +1587,7 @@ onMounted(() => {
         setTimeout(() => {
             subscribeToNavigationStatus()
             subscribeToTaskStatus()
+            subscribeToCommandTopics()
             // 设置默认循环模式为单次执行（0）
             rosConnection.publish('/goal_queue/set_loop_count', 'std_msgs/Int32', { data: 0 }).catch(() => {
                 // 静默失败，不影响其他初始化
@@ -1529,6 +1609,8 @@ onUnmounted(() => {
 
     // 清理订阅
     rosConnection.unsubscribe('/launch_trigger_status')
+    rosConnection.unsubscribe('/goal_queue/start')
+    rosConnection.unsubscribe('/goal_queue/stop')
 
     // 注意：不清理定时启动定时器，因为使用了 keep-alive，组件状态会被保持
     // 定时器会继续运行，即使切换面板也不会被清理

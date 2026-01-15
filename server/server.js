@@ -8,8 +8,12 @@ import http from 'http';
 import https from 'https';
 import { gzip } from 'zlib';
 import { promisify } from 'util';
+import { createRequire } from 'module';
 import { getRocketMQBridge } from './rocketmqBridge.js';
 import { ScheduleManager } from './scheduleManager.js';
+
+const require = createRequire(import.meta.url);
+const weatherConfig = require('../config/weather.json');
 
 const gzipPromise = promisify(gzip);
 
@@ -71,12 +75,124 @@ app.use('/images', express.static(join(__dirname, '../image')));
 const weatherCache = {
     data: null,
     timestamp: 0,
-    city: 'Wuhan' // Default city
+    city: weatherConfig.defaultCity
 };
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
-app.get('/api/weather', (req, res) => {
-    const city = req.query.city || 'Wuhan';
+// WMO Weather Codes mapping for Open-Meteo
+const WMO_CODES = {
+    0: '晴',
+    1: '多云', 2: '多云', 3: '阴',
+    45: '雾', 48: '雾',
+    51: '毛毛雨', 53: '毛毛雨', 55: '毛毛雨',
+    56: '冻雨', 57: '冻雨',
+    61: '小雨', 63: '中雨', 65: '大雨',
+    66: '冻雨', 67: '冻雨',
+    71: '小雪', 73: '中雪', 75: '大雪',
+    77: '雪粒',
+    80: '阵雨', 81: '阵雨', 82: '强阵雨',
+    85: '阵雪', 86: '阵雪',
+    95: '雷雨', 96: '雷雨伴有冰雹', 99: '雷雨伴有冰雹'
+};
+
+const fetchJson = (url, timeout = 5000) => {
+    return new Promise((resolve, reject) => {
+        const req = https.get(url, (res) => {
+            if (res.statusCode < 200 || res.statusCode >= 300) {
+                return reject(new Error(`Status Code: ${res.statusCode}`));
+            }
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+        req.on('error', reject);
+        req.setTimeout(timeout, () => {
+            req.destroy();
+            reject(new Error('Request timed out'));
+        });
+    });
+};
+
+const fetchOpenMeteo = async (city) => {
+    try {
+        // 1. Geocoding
+        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh&format=json`;
+        const geoData = await fetchJson(geoUrl);
+
+        if (!geoData.results || geoData.results.length === 0) {
+            throw new Error('City not found in Open-Meteo');
+        }
+
+        const { latitude, longitude } = geoData.results[0];
+
+        // 2. Weather
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&hourly=precipitation_probability,weather_code&timezone=auto`;
+        const weatherData = await fetchJson(weatherUrl);
+
+        // 3. Adapt to wttr.in format
+        const current = weatherData.current;
+        const hourly = weatherData.hourly;
+
+        // Construct hourly forecast for today (simplified)
+        const hourlyAdapted = hourly.time.map((t, i) => {
+            const date = new Date(t);
+            const hourStr = date.getHours() + "00"; // "100", "1300"
+            return {
+                time: hourStr,
+                chanceofrain: String(hourly.precipitation_probability[i]),
+                weatherDesc: [{ value: WMO_CODES[hourly.weather_code[i]] || '未知' }],
+                lang_zh: [{ value: WMO_CODES[hourly.weather_code[i]] || '未知' }]
+            };
+        }).slice(0, 24);
+
+        return {
+            current_condition: [{
+                temp_C: String(current.temperature_2m),
+                humidity: String(current.relative_humidity_2m),
+                windspeedKmph: String(current.wind_speed_10m),
+                weatherDesc: [{ value: WMO_CODES[current.weather_code] || '未知' }],
+                lang_zh: [{ value: WMO_CODES[current.weather_code] || '未知' }],
+                precipMM: String(current.precipitation)
+            }],
+            weather: [{
+                hourly: hourlyAdapted
+            }]
+        };
+    } catch (error) {
+        console.error('Open-Meteo fetch failed:', error);
+        throw error;
+    }
+};
+
+const fetchWeatherData = async (city) => {
+    console.log(`Fetching weather for ${city} from Open-Meteo`);
+    return await fetchOpenMeteo(city);
+};
+
+// Prefetch weather on startup
+const prefetchWeather = async () => {
+    try {
+        console.log('Prefetching weather data...');
+        const data = await fetchWeatherData(weatherCache.city);
+        weatherCache.data = data;
+        weatherCache.timestamp = Date.now();
+        console.log('Weather data prefetched successfully');
+    } catch (error) {
+        console.error('Failed to prefetch weather:', error);
+    }
+};
+
+// Start prefetch
+prefetchWeather();
+
+app.get('/api/weather', async (req, res) => {
+    const city = req.query.city || weatherConfig.defaultCity;
     const now = Date.now();
 
     // Check cache
@@ -87,45 +203,53 @@ app.get('/api/weather', (req, res) => {
         return res.json(weatherCache.data);
     }
 
-    console.log(`Fetching weather for ${city} from wttr.in`);
-    const url = `https://wttr.in/${encodeURIComponent(city)}?format=j1&lang=zh`;
-
-    https.get(url, (response) => {
-        let data = '';
-
-        response.on('data', (chunk) => {
-            data += chunk;
-        });
-
-        response.on('end', () => {
-            try {
-                const jsonData = JSON.parse(data);
-                // Update cache
-                weatherCache.data = jsonData;
-                weatherCache.timestamp = now;
-                weatherCache.city = city;
-
-                res.json(jsonData);
-            } catch (e) {
-                console.error('Error parsing weather data:', e);
-                // If parse fails but we have old cache, serve it as fallback
-                if (weatherCache.data && weatherCache.city === city) {
-                    console.log('Serving stale weather cache due to parse error');
-                    return res.json(weatherCache.data);
-                }
-                res.status(500).json({ error: 'Failed to parse weather data' });
-            }
-        });
-
-    }).on('error', (err) => {
-        console.error('Error fetching weather:', err);
-        // If fetch fails but we have old cache, serve it as fallback
+    try {
+        const data = await fetchWeatherData(city);
+        // Update cache
+        weatherCache.data = data;
+        weatherCache.timestamp = now;
+        weatherCache.city = city;
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching weather:', error);
+        // Fallback to cache if available
         if (weatherCache.data && weatherCache.city === city) {
-            console.log('Serving stale weather cache due to fetch error');
+            console.log('Serving stale weather cache due to error');
             return res.json(weatherCache.data);
         }
         res.status(500).json({ error: 'Failed to fetch weather data' });
-    });
+    }
+});
+
+// Weather Config API
+app.get('/api/weather/config', (req, res) => {
+    res.json(weatherConfig);
+});
+
+app.post('/api/weather/config', async (req, res) => {
+    try {
+        const { defaultCity } = req.body;
+        if (!defaultCity || typeof defaultCity !== 'string') {
+            return res.status(400).json({ error: 'Invalid defaultCity' });
+        }
+
+        // Update config object in memory
+        weatherConfig.defaultCity = defaultCity;
+
+        // Write to file
+        const configPath = join(__dirname, '../config/weather.json');
+        await writeFile(configPath, JSON.stringify(weatherConfig, null, 4));
+
+        // Update cache city if it matches the old default (optional, but good practice)
+        // If we want to force a refresh on next request for this new city, we can clear cache or just let it be.
+        // Let's just update the config.
+
+        console.log(`Updated default weather city to: ${defaultCity}`);
+        res.json({ success: true, defaultCity });
+    } catch (error) {
+        console.error('Failed to update weather config:', error);
+        res.status(500).json({ error: 'Failed to update configuration' });
+    }
 });
 
 // 优化的流式处理：使用固定大小缓冲区，避免内存溢出
@@ -824,15 +948,18 @@ app.post('/api/maps/download-from-robot', async (req, res) => {
         const robotUrlObj = new URL(robotUrl);
         const robotHost = robotUrlObj.hostname;
         const robotPort = parseInt(robotUrlObj.port || '8080', 10);
+        const isHttps = robotUrlObj.protocol === 'https:';
+        const requestModule = isHttps ? https : http;
         const apiPrefix = '/api/files';
 
         try {
             const healthCheck = await new Promise((resolve) => {
-                const healthReq = http.get({
+                const healthReq = requestModule.get({
                     hostname: robotHost,
                     port: robotPort,
                     path: `${apiPrefix}/health`,
-                    timeout: 5000
+                    timeout: 5000,
+                    rejectUnauthorized: false // Allow self-signed certs
                 }, (healthRes) => {
                     let data = '';
                     healthRes.on('data', (chunk) => { data += chunk.toString(); });
@@ -935,7 +1062,8 @@ app.post('/api/maps/download-from-robot', async (req, res) => {
                     port: robotPort,
                     path: `${apiPrefix}/download?path=${encodeURIComponent(remotePath)}&_t=${Date.now()}`,
                     timeout: 10 * 60 * 1000,
-                    method: 'GET'
+                    method: 'GET',
+                    rejectUnauthorized: false // Allow self-signed certs
                 };
 
                 if (resumeFrom > 0 && fileSize > 0) {
@@ -944,7 +1072,7 @@ app.post('/api/maps/download-from-robot', async (req, res) => {
                     };
                 }
 
-                const downloadReq = http.request(downloadOptions, (downloadRes) => {
+                const downloadReq = requestModule.request(downloadOptions, (downloadRes) => {
                     if (downloadRes.statusCode !== 200 && downloadRes.statusCode !== 206) {
                         rejectFile(new Error(`HTTP ${downloadRes.statusCode}`));
                         return;
@@ -1332,16 +1460,19 @@ app.post('/api/maps/send-to-robot', async (req, res) => {
         const robotUrlObj = new URL(robotUrl);
         const robotHost = robotUrlObj.hostname;
         const robotPort = parseInt(robotUrlObj.port || '8080', 10);
+        const isHttps = robotUrlObj.protocol === 'https:';
+        const requestModule = isHttps ? https : http;
         const apiPrefix = '/api/files';
 
         // Check robot health
         try {
             const healthCheck = await new Promise((resolve) => {
-                const healthReq = http.get({
+                const healthReq = requestModule.get({
                     hostname: robotHost,
                     port: robotPort,
                     path: `${apiPrefix}/health`,
-                    timeout: 5000
+                    timeout: 5000,
+                    rejectUnauthorized: false // Allow self-signed certs
                 }, (healthRes) => {
                     let data = '';
                     healthRes.on('data', (chunk) => { data += chunk.toString(); });
@@ -1452,10 +1583,11 @@ app.post('/api/maps/send-to-robot', async (req, res) => {
                         headers: {
                             'Content-Type': `multipart/form-data; boundary=${boundary}`,
                             'Content-Length': totalRequestSize.toString()
-                        }
+                        },
+                        rejectUnauthorized: false // Allow self-signed certs
                     };
 
-                    const httpReq = http.request(options, (httpRes) => {
+                    const httpReq = requestModule.request(options, (httpRes) => {
                         let responseData = '';
 
                         if (httpRes.statusCode && (httpRes.statusCode < 200 || httpRes.statusCode >= 300)) {
@@ -1826,9 +1958,21 @@ app.post('/api/notification', (req, res) => {
         if (normalizedPath.startsWith(normalizedDir)) {
             // Replace absolute path with relative URL
             notification.imageUrl = '/images' + normalizedPath.substring(normalizedDir.length);
+        } else {
+            // Fallback: try to find "/image/" in the path and use it as relative root
+            // This handles cases where host path structure differs from container path
+            const imageMarker = '/image/';
+            const index = normalizedPath.indexOf(imageMarker);
+            if (index !== -1) {
+                notification.imageUrl = '/images' + normalizedPath.substring(index + imageMarker.length - 1); // include /
+            }
         }
     }
 
+    // Send to all connected clients
+    sseClients.forEach(client => {
+        client.res.write(`data: ${JSON.stringify(notification)}\n\n`);
+    });
 
     res.json({ success: true, count: sseClients.length });
 });

@@ -700,7 +700,8 @@ const handleUploadTopicMessage = async (message: any) => {
 
     try {
         const wsUrlObj = new URL(wsUrl)
-        const robotHttpUrl = `http://${wsUrlObj.hostname}:8080`
+        const protocol = wsUrlObj.protocol === 'wss:' ? 'https:' : 'http:'
+        const robotHttpUrl = `${protocol}//${wsUrlObj.hostname}:8080`
 
         const response = await fetch(`${API_BASE_URL}/images/download-from-robot`, {
             method: 'POST',
@@ -1207,7 +1208,8 @@ const confirmUploadMap = async () => {
 
             // 从 WebSocket URL 提取机器狗的 HTTP URL
             const wsUrlObj = new URL(wsUrl)
-            const robotHttpUrl = `http://${wsUrlObj.hostname}:8080`
+            const protocol = wsUrlObj.protocol === 'wss:' ? 'https:' : 'http:'
+            const robotHttpUrl = `${protocol}//${wsUrlObj.hostname}:8080`
 
             // 初始化进度状态
             uploadMapTotalSize.value = 0
@@ -2035,7 +2037,8 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             
             // 从 WebSocket URL 提取机器狗的 HTTP URL
             const wsUrlObj = new URL(wsUrl)
-            const robotHttpUrl = `http://${wsUrlObj.hostname}:8080`
+            const protocol = wsUrlObj.protocol === 'wss:' ? 'https:' : 'http:'
+            const robotHttpUrl = `${protocol}//${wsUrlObj.hostname}:8080`
             
             const response = await fetch(`${API_BASE_URL}/maps/send-to-robot`, {
                 method: 'POST',
