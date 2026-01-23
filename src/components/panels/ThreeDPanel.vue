@@ -432,6 +432,38 @@ const subscribeToMarkers = async () => {
     }
 }
 
+// 订阅/goal_queue/stop话题，用于任务完成后趴下
+const subscribeToQueueStop = async () => {
+    if (!rosConnection.isConnected()) return
+
+    try {
+        rosConnection.unsubscribe('/goal_queue/stop')
+
+        await rosConnection.subscribe({
+            topic: '/goal_queue/stop',
+            messageType: 'std_msgs/Empty',
+            callback: () => {
+                handleStopQueue()
+            }
+        })
+    } catch (error) {
+        console.error('订阅stop话题失败:', error)
+    }
+}
+
+const handleStopQueue = async () => {
+    // 收到Stop信号，延迟2s执行趴下
+    ElMessage.info('任务完成：2秒后执行趴下')
+    setTimeout(async () => {
+        try {
+            await rosConnection.publish('/upDown', 'std_msgs/String', { data: 'down' })
+            ElMessage.success('已发送趴下指令')
+        } catch (error) {
+            console.error('Failed to publish down command:', error)
+        }
+    }, 2000)
+}
+
 // 清理marker对象的辅助函数
 const disposeMarkerObject = (obj: THREE.Object3D) => {
     if (obj instanceof THREE.Group) {
@@ -1110,6 +1142,7 @@ watch(() => rosStore.isConnected, (connected) => {
         subscribeToFootprint()
         subscribeToPlan()
         subscribeToMarkers()
+        subscribeToQueueStop()
     }
 }, { immediate: true })
 
@@ -1122,6 +1155,7 @@ onMounted(() => {
         subscribeToFootprint()
         subscribeToPlan()
         subscribeToMarkers()
+        subscribeToQueueStop()
     }
 })
 
@@ -1167,6 +1201,7 @@ onUnmounted(() => {
     rosConnection.unsubscribe('/move_base/global_costmap/footprint')
     rosConnection.unsubscribe('/move_base/GlobalPlanner/plan')
     rosConnection.unsubscribe('/goal_queue/markers')
+    rosConnection.unsubscribe('/goal_queue/stop')
 
     // 清理footprint和plan
     if (footprintLine) {

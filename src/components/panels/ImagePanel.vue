@@ -293,7 +293,8 @@ const handleImageMessage = (message: RosMessage) => {
 
 // 自动选择并订阅默认摄像头话题
 // --- 自动采集与任务监听逻辑 ---
-const isAutoCapturing = ref(false)
+// const isAutoCapturing = ref(false) // Replace with store state
+const isAutoCapturing = computed(() => rosStore.isAutoCapturing)
 let velocityTimer: ReturnType<typeof setInterval> | null = null
 
 // 发布速度指令控制机器狗
@@ -350,7 +351,7 @@ const stopAutoCapture = async () => {
     // 停止 PTZ (保险起见)
     await publishPtzCommand('stop')
     
-    isAutoCapturing.value = false
+    rosStore.setAutoCapturing(false) // Update store
     
     // 发布 continue 消息
     try {
@@ -373,7 +374,7 @@ const stopAutoCapture = async () => {
 }
 
 const startAutoCapture = async (folderName: string) => {
-    isAutoCapturing.value = true
+    rosStore.setAutoCapturing(true, folderName) // Update store
     ElMessage.info(`开始自动采集任务: ${folderName}`)
     
     // 切换到经典模式 (行走更稳，适合定点旋转)
@@ -629,6 +630,14 @@ onMounted(() => {
     // 如果已经连接且没有选中话题,立即尝试自动订阅
     if (rosStore.isConnected && !settingsStore.selectedTopic) {
         autoSubscribeDefaultCamera()
+    }
+
+    // 检查是否有未完成的采集任务
+    if (rosStore.isAutoCapturing && rosStore.currentCaptureFolder) {
+        ElMessage.warning('检测到上次未完成的自动采集任务，尝试恢复...')
+        // 恢复采集逻辑：重新调用 startAutoCapture 并传入相同的 folderName
+        // 注意：这会重新触发模式切换和第一步旋转，可能不是完美的断点续传，但能保证任务继续
+        startAutoCapture(rosStore.currentCaptureFolder)
     }
 })
 

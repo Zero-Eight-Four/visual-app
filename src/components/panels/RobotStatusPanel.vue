@@ -507,21 +507,22 @@ const parseStatusString = (statusString: string): RobotStatus => {
 }
 
 // 温度保护状态
-const isTempProtectionActive = ref(false)
+// const isTempProtectionActive = ref(false) // Replace with store
 
 // 检查温度并执行保护逻辑
 const checkTemperatureProtection = (status: RobotStatus) => {
     const maxTemp = status.motor_hottest_temp
     if (maxTemp === undefined) return
+    const isTempProtectionActive = rosStore.isTempProtectionTriggered
 
-    if (maxTemp > 70 && !isTempProtectionActive.value) {
+    if (maxTemp > 70 && !isTempProtectionActive) {
         // 触发高温保护
-        isTempProtectionActive.value = true
+        rosStore.setTempProtectionTriggered(true)
         rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'stop' })
         ElMessage.error(`警告：电机温度过高 (${maxTemp.toFixed(1)}°C)，已发送停止指令！`)
-    } else if (maxTemp < 56 && isTempProtectionActive.value) {
+    } else if (maxTemp < 56 && isTempProtectionActive) {
         // 解除高温保护
-        isTempProtectionActive.value = false
+        rosStore.setTempProtectionTriggered(false)
         rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'start' })
         ElMessage.success(`电机温度已恢复正常 (${maxTemp.toFixed(1)}°C)，已发送启动指令。`)
     }

@@ -84,17 +84,16 @@ export class ScheduleManager {
         // if (this.isProcessing) return;
 
         const now = new Date();
-        // Convert to Beijing Time (UTC+8)
-        const utcTimestamp = now.getTime() + (now.getTimezoneOffset() * 60000);
-        const beijingTimestamp = utcTimestamp + (8 * 60 * 60 * 1000);
+        // Convert to Beijing Time (UTC+8) robustly
+        // now.getTime() is UTC timestamp. Add 8 hours to shift to Beijing timezone.
+        // Then reading .getUTC* components gives us beijing time.
+        const beijingTimestamp = now.getTime() + (8 * 60 * 60 * 1000);
         const beijingDate = new Date(beijingTimestamp);
 
         const currentDay = beijingDate.getUTCDay(); // 0 = Sunday, 1 = Monday, ...
         const currentHour = beijingDate.getUTCHours();
         const currentMinute = beijingDate.getUTCMinutes();
 
-        // Map JS getDay() to user friendly days (1=Mon, 7=Sun) or keep 0-6.
-        // Let's assume the UI sends 0-6 or 1-7.
         // Standard: 0=Sun, 1=Mon, ..., 6=Sat.
 
         for (const schedule of this.schedules) {
@@ -177,10 +176,61 @@ export class ScheduleManager {
                 startQueueTopic.publish(new ROSLIB.Message({}));
                 console.log(`[ScheduleManager] Sent start command to /goal_queue/start`);
 
-                // Close connection after a short delay to ensure message is sent
-                setTimeout(() => {
-                    ros.close();
-                }, 1000);
+                // 4. Wait for Task Completion (Subscribe to /goal_queue/stop)
+                const stopQueueTopic = new ROSLIB.Topic({
+                    ros: ros,
+                    name: '/goal_queue/stop',
+                    messageType: 'std_msgs/Empty'
+                });
+
+                let isCompleted = false;
+
+                const cleanup = () => {
+                    if (taskTimeout) clearTimeout(taskTimeout);
+                    try {
+                        stopQueueTopic.unsubscribe();
+                        ros.close();
+                    } catch (e) {
+                        console.error('[ScheduleManager] Error during cleanup:', e);
+                    }
+                };
+
+                // Safety timeout (30 minutes)
+                const taskTimeout = setTimeout(() => {
+                    if (!isCompleted) {
+                        console.log(`[ScheduleManager] Task timeout for ${schedule.robotName}`);
+                        cleanup();
+                    }
+                }, 30 * 60 * 1000);
+
+                stopQueueTopic.subscribe((message) => {
+                    if (isCompleted) return;
+                    isCompleted = true;
+                    console.log(`[ScheduleManager] Received stop signal for ${schedule.robotName}`);
+
+                    // Wait 2 seconds then lie down (matching frontend behavior)
+                    setTimeout(() => {
+                        try {
+                            const upDownTopic = new ROSLIB.Topic({
+                                ros: ros,
+                                name: '/upDown',
+                                messageType: 'std_msgs/String'
+                            });
+                            upDownTopic.publish(new ROSLIB.Message({ data: 'down' }));
+                            console.log(`[ScheduleManager] Sent 'down' command to /upDown`);
+                        } catch (e) {
+                            console.error('[ScheduleManager] Error sending down command:', e);
+                        }
+
+                        // Do NOT close connection, just stop listening and clear timeout
+                        if (taskTimeout) clearTimeout(taskTimeout);
+                        try {
+                            stopQueueTopic.unsubscribe();
+                        } catch (e) {
+                            console.error('[ScheduleManager] Error unsubscribing:', e);
+                        }
+                    }, 2000);
+                });
 
             } catch (error) {
                 console.log(`[ScheduleManager] Robot ${schedule.robotName} not connected or error: ${error.message}`);

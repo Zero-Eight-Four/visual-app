@@ -19,6 +19,12 @@ export const useRosStore = defineStore('ros', () => {
   const selectedStateTopic = ref<string>('')
   const robotStatus = ref<RobotStatus | null>(null)
 
+  // Persistent State (Load from localStorage)
+  const isAutoCapturing = ref(localStorage.getItem('ros_isAutoCapturing') === 'true')
+  const currentCaptureFolder = ref(localStorage.getItem('ros_currentCaptureFolder') || '')
+  const robotPoseStatus = ref<'up' | 'down' | 'unknown'>((localStorage.getItem('ros_robotPoseStatus') as any) || 'unknown')
+  const isTempProtectionTriggered = ref(localStorage.getItem('ros_isTempProtectionTriggered') === 'true')
+
   // Computed
   const isConnected = computed(() => connectionState.value.connected)
   const imageTopics = computed(() =>
@@ -48,6 +54,30 @@ export const useRosStore = defineStore('ros', () => {
     robotStatus.value = status
   }
 
+  // Persistent Actions
+  function setAutoCapturing(capturing: boolean, folder: string = '') {
+    isAutoCapturing.value = capturing
+    localStorage.setItem('ros_isAutoCapturing', String(capturing))
+
+    if (capturing) {
+      currentCaptureFolder.value = folder
+      localStorage.setItem('ros_currentCaptureFolder', folder)
+    } else {
+      currentCaptureFolder.value = ''
+      localStorage.removeItem('ros_currentCaptureFolder')
+    }
+  }
+
+  function setRobotPoseStatus(status: 'up' | 'down' | 'unknown') {
+    robotPoseStatus.value = status
+    localStorage.setItem('ros_robotPoseStatus', status)
+  }
+
+  function setTempProtectionTriggered(triggered: boolean) {
+    isTempProtectionTriggered.value = triggered
+    localStorage.setItem('ros_isTempProtectionTriggered', String(triggered))
+  }
+
   async function fetchTopics() {
     if (!connectionState.value.connected) return
 
@@ -73,11 +103,18 @@ export const useRosStore = defineStore('ros', () => {
     selectedImageTopic,
     selectedStateTopic,
     robotStatus,
+    isAutoCapturing,
+    currentCaptureFolder,
+    robotPoseStatus,
+    isTempProtectionTriggered,
     isConnected,
     imageTopics,
     setConnectionState,
     setTopics,
     fetchTopics,
+    setAutoCapturing,
+    setRobotPoseStatus,
+    setTempProtectionTriggered,
     setSelectedImageTopic,
     setSelectedStateTopic,
     setRobotStatus

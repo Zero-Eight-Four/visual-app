@@ -144,36 +144,21 @@
                             定时启动
                         </div>
                         <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                            <el-button :type="scheduledStartTimer ? 'warning' : 'info'" plain size="small"
-                                style="flex: 1" :disabled="!isNavigationRunning || !isConnected"
+                            <el-button type="primary" plain size="small"
+                                style="flex: 1" :disabled="!isConnected"
                                 @click="handleScheduledStartSimple">
                                 <el-icon style="margin-right: 4px">
-                                    <Clock v-if="!scheduledStartTimer" />
-                                    <Close v-else />
+                                    <Clock />
                                 </el-icon>
-                                {{ scheduledStartTimer ? '取消定时' : '定时启动' }}
+                                添加定时任务
                             </el-button>
                         </div>
-                        <div v-if="scheduledStartTimer"
-                            style="margin-bottom: 8px; padding: 8px; background-color: #fff7e6; border-radius: 4px; font-size: 12px;">
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                                <span style="color: #606266;">
-                                    <el-icon style="margin-right: 4px;">
-                                        <Timer />
-                                    </el-icon>
-                                    倒计时：
-                                </span>
-                                <span style="color: #e6a23c; font-weight: 500; font-size: 14px;">
-                                    {{ formatCountdown(scheduledStartCountdown) }}
-                                </span>
-                            </div>
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #909399;">
-                                <span>目标时间：</span>
-                                <span>{{ formatScheduledTime(scheduledStartTime) }}</span>
-                            </div>
+                        <!-- 提示信息 -->
+                        <div style="margin-bottom: 8px; font-size: 12px; color: #909399;">
+                            <el-icon style="margin-right: 4px; vertical-align: -2px;"><InfoFilled /></el-icon>
+                            定时任务将保存在服务器端，无需保持网页开启。
                         </div>
+
 
                         <!-- 循环模式设置 -->
                         <div class="control-group-label" style="margin-top: 0;">
@@ -295,23 +280,40 @@
         </el-scrollbar>
 
         <!-- 时间选择对话框 -->
-        <el-dialog v-model="showTimePickerDialog" title="定时启动任务（24小时制）" width="400px" :close-on-click-modal="false">
-            <div style="padding: 20px 0;">
+        <el-dialog v-model="showTimePickerDialog" title="设置每周定时巡检任务" width="450px" :close-on-click-modal="false">
+            <el-form label-width="80px">
                 <div style="margin-bottom: 15px; color: #606266; font-size: 13px;">
-                    请选择启动时间（24小时制）：
+                    设置机器狗自动执行任务的时间计划。到达时间后，机器狗将自动起立并开始执行巡检队列。
                 </div>
-                <el-time-picker v-model="selectedTime" format="HH:mm" value-format="HH:mm" placeholder="选择时间"
-                    style="width: 100%" size="default" />
-                <div style="margin-top: 15px; color: #909399; font-size: 12px;">
-                    当前时间：{{ new Date().toLocaleTimeString('zh-CN', { hour12: false }) }}
-                </div>
-                <div style="margin-top: 8px; color: #909399; font-size: 11px;">
-                    提示：只能选择当前时间之后的时间，如果选择的时间已过今天，将自动设置为明天该时间
-                </div>
-            </div>
+                
+                <el-form-item label="任务名称">
+                    <el-input v-model="scheduleName" placeholder="例如：每日晨检" />
+                </el-form-item>
+
+                <el-form-item label="启动时间">
+                    <el-time-picker v-model="selectedTime" format="HH:mm" value-format="HH:mm" placeholder="选择时间"
+                        style="width: 100%" />
+                </el-form-item>
+
+                <el-form-item label="重复周期">
+                    <el-checkbox-group v-model="scheduleDays">
+                        <el-checkbox :label="1">周一</el-checkbox>
+                        <el-checkbox :label="2">周二</el-checkbox>
+                        <el-checkbox :label="3">周三</el-checkbox>
+                        <el-checkbox :label="4">周四</el-checkbox>
+                        <el-checkbox :label="5">周五</el-checkbox>
+                        <el-checkbox :label="6">周六</el-checkbox>
+                        <el-checkbox :label="0">周日</el-checkbox>
+                    </el-checkbox-group>
+                </el-form-item>
+
+                <el-form-item label="启用状态">
+                    <el-switch v-model="scheduleEnabled" active-text="启用" inactive-text="禁用" />
+                </el-form-item>
+            </el-form>
             <template #footer>
                 <el-button @click="showTimePickerDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmScheduledStart">确定</el-button>
+                <el-button type="primary" @click="confirmScheduledStart">保存任务</el-button>
             </template>
         </el-dialog>
 
@@ -507,8 +509,6 @@ import {
     CircleCheck,
     InfoFilled,
     Clock,
-    Close,
-    Timer,
     ArrowUp,
     ArrowDown,
     ArrowLeft,
@@ -622,13 +622,13 @@ const taskStatus = ref({
     isRunning: false
 })
 
-// 定时启动状态
-const scheduledStartTimer = ref<number | null>(null) // 定时器ID
-const scheduledStartCountdown = ref(0) // 倒计时（秒）
-const scheduledStartTime = ref<Date | null>(null) // 目标启动时间（北京时间）
-const countdownInterval = ref<number | null>(null) // 倒计时更新定时器
+// 定时启动状态 - 废弃的前端定时器状态已移除
 const showTimePickerDialog = ref(false) // 显示时间选择对话框
 const selectedTime = ref<string>('') // 选择的时间（HH:mm:ss格式）
+// 新增定时任务相关状态
+const scheduleDays = ref<number[]>([1, 2, 3, 4, 5])
+const scheduleEnabled = ref(true)
+const scheduleName = ref('自动巡检任务')
 
 // 录制状态设置
 const showRecordDialog = ref(false)
@@ -852,6 +852,7 @@ const handleRobotAction = async (action: string) => {
     if (action === 'up' || action === 'down') {
         try {
             await rosConnection.publish('/upDown', 'std_msgs/String', { data: action })
+            rosStore.setRobotPoseStatus(action) // Save state
             ElMessage.success(`已发送${action === 'up' ? '起立' : '趴下'}指令`)
         } catch (error) {
             console.error('Failed to publish action command:', error)
@@ -1213,171 +1214,81 @@ const handleSetLoopCount = async () => {
     }
 }
 
-// 处理定时启动（使用滑动选择时间）
-const handleScheduledStartSimple = async () => {
-    if (!rosConnection.isConnected()) {
-        ElMessage.warning('请先连接到机器狗')
-        return
-    }
-
     // 如果已有定时器，取消它
-    if (scheduledStartTimer.value !== null) {
-        cancelScheduledStart()
-        return
-    }
-
-    // 设置默认时间为当前时间+10分钟
+// 处理定时启动（打开对话框）
+const handleScheduledStartSimple = () => {
     const now = new Date()
-    now.setMinutes(now.getMinutes() + 10)
-    const defaultTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    selectedTime.value = defaultTime
-
-    // 显示时间选择对话框
+    const defaultHour = String(now.getHours()).padStart(2, '0')
+    const defaultMin = String(now.getMinutes()).padStart(2, '0')
+    selectedTime.value = `${defaultHour}:${defaultMin}`
+    
+    // 重置表单
+    scheduleDays.value = [1, 2, 3, 4, 5]
+    scheduleEnabled.value = true
+    scheduleName.value = '自动巡检任务'
+    
     showTimePickerDialog.value = true
 }
 
-// 确认定时启动
-const confirmScheduledStart = () => {
+// 确认保存定时任务
+const confirmScheduledStart = async () => {
     if (!selectedTime.value) {
         ElMessage.warning('请选择启动时间')
         return
     }
-
-    // 解析选择的时间（HH:mm格式）
-    const [hours, minutes] = selectedTime.value.split(':')
-    const selectedHour = parseInt(hours)
-    const selectedMinute = parseInt(minutes)
-
-    if (isNaN(selectedHour) || isNaN(selectedMinute) || selectedHour < 0 || selectedHour > 23 || selectedMinute < 0 || selectedMinute > 59) {
-        ElMessage.error('时间格式错误')
+    
+    if (scheduleDays.value.length === 0) {
+        ElMessage.warning('请至少选择一天')
         return
     }
 
-    // 计算目标时间（秒数默认为0）
-    const now = new Date()
-    const targetTime = new Date()
-    targetTime.setHours(selectedHour, selectedMinute, 0, 0)
+    try {
+        let robotIp = 'localhost'
+        let robotName = 'Current Robot'
 
-    // 如果选择的时间在今天已经过了，设置为明天
-    if (targetTime.getTime() <= now.getTime()) {
-        targetTime.setDate(targetTime.getDate() + 1)
-    }
-
-    // 再次检查，确保目标时间一定在当前时间之后
-    const delay = targetTime.getTime() - now.getTime()
-    const delaySeconds = Math.floor(delay / 1000)
-
-    if (delaySeconds <= 0) {
-        ElMessage.warning('启动时间必须晚于当前时间，请重新选择')
-        return
-    }
-
-    // 如果延迟时间太短（小于1分钟），提示用户
-    if (delaySeconds < 60) {
-        ElMessage.warning('定时启动时间至少需要1分钟后，请重新选择')
-        return
-    }
-
-    startScheduledStart(delaySeconds, targetTime)
-    showTimePickerDialog.value = false
-}
-
-// 格式化时间为字符串（只显示时间，不显示日期，不显示秒）
-const formatTimeOnly = (date: Date): string => {
-    const hour = String(date.getHours()).padStart(2, '0')
-    const minute = String(date.getMinutes()).padStart(2, '0')
-    return `${hour}:${minute}`
-}
-
-// 启动定时启动
-const startScheduledStart = (delaySeconds: number, targetTime: Date) => {
-    // 取消之前的定时器（如果有），但不显示消息
-    if (scheduledStartTimer.value !== null) {
-        clearTimeout(scheduledStartTimer.value)
-        scheduledStartTimer.value = null
-    }
-    if (countdownInterval.value !== null) {
-        clearInterval(countdownInterval.value)
-        countdownInterval.value = null
-    }
-
-    scheduledStartCountdown.value = delaySeconds
-    scheduledStartTime.value = targetTime
-
-    // 启动倒计时更新
-    countdownInterval.value = window.setInterval(() => {
-        scheduledStartCountdown.value--
-        if (scheduledStartCountdown.value <= 0) {
-            clearInterval(countdownInterval.value!)
-            countdownInterval.value = null
+        if (rosConnection.isConnected()) {
+            try {
+                const url = new URL(rosStore.connectionState.url)
+                robotIp = url.hostname
+                robotName = `Robot (${robotIp})`
+            } catch (e) {
+                console.error('Invalid URL:', e)
+            }
         }
-    }, 1000)
 
-    // 设置定时器，延迟执行任务启动
-    scheduledStartTimer.value = window.setTimeout(() => {
-        // 执行任务启动
-        publishCommand('/goal_queue/start')
-        ElMessage.success('定时启动任务已执行')
-
-        // 清理定时器
-        scheduledStartTimer.value = null
-        scheduledStartCountdown.value = 0
-        scheduledStartTime.value = null
-        if (countdownInterval.value !== null) {
-            clearInterval(countdownInterval.value)
-            countdownInterval.value = null
+        const scheduleData = {
+            name: scheduleName.value || '未命名任务',
+            robotName: robotName,
+            robotIp: robotIp,
+            days: scheduleDays.value,
+            time: selectedTime.value,
+            enabled: scheduleEnabled.value
         }
-    }, delaySeconds * 1000)
 
-    const timeStr = formatTimeOnly(targetTime)
-    const isTomorrow = targetTime.getDate() !== new Date().getDate()
-    const dateStr = isTomorrow ? '明天' : '今天'
-    ElMessage.success(`已设置定时启动，将在 ${dateStr} ${timeStr} 执行`)
-}
+        const response = await fetch(`${API_BASE_URL}/schedules`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(scheduleData)
+        })
 
-// 取消定时启动
-const cancelScheduledStart = (showMessage: boolean = true) => {
-    const hadTimer = scheduledStartTimer.value !== null || countdownInterval.value !== null
+        if (!response.ok) {
+            throw new Error('Failed to save schedule')
+        }
 
-    if (scheduledStartTimer.value !== null) {
-        clearTimeout(scheduledStartTimer.value)
-        scheduledStartTimer.value = null
-    }
-    if (countdownInterval.value !== null) {
-        clearInterval(countdownInterval.value)
-        countdownInterval.value = null
-    }
-    scheduledStartCountdown.value = 0
-    scheduledStartTime.value = null
-
-    // 只有在有定时器且需要显示消息时才显示
-    if (showMessage && hadTimer) {
-        ElMessage.info('已取消定时启动')
+        ElMessage.success('定时任务已保存到服务器')
+        showTimePickerDialog.value = false
+        
+    } catch (error) {
+        console.error('Failed to save schedule:', error)
+        ElMessage.error('保存任务失败')
     }
 }
 
-// 格式化倒计时显示
-const formatCountdown = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-    const secs = seconds % 60
 
-    if (hours > 0) {
-        return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-    } else if (minutes > 0) {
-        return `${minutes}:${String(secs).padStart(2, '0')}`
-    } else {
-        return `${secs} 秒`
-    }
-}
 
-// 格式化定时启动时间显示（只显示时间）
-const formatScheduledTime = (date: Date | null): string => {
-    if (!date) return ''
-    const isTomorrow = date.getDate() !== new Date().getDate()
-    const dateStr = isTomorrow ? '明天' : '今天'
-    return `${dateStr} ${formatTimeOnly(date)}`
-}
+
 
 // 订阅任务状态（通过 /rosout 获取任务执行信息）
 // 实际状态更新在 subscribeToQueueList 的回调中处理

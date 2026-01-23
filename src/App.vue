@@ -51,9 +51,9 @@ onMounted(() => {
                 title: data.title || '系统通知',
                 message: messageContent,
                 type: data.type || 'info',
-                duration: 0, // 不自动消失
-                position: 'top-right', // 默认位置，会被 CSS 覆盖
-                customClass: 'notification-center-override', // 自定义类名用于居中
+                duration: 10000,
+                position: 'bottom-right',
+                customClass: 'notification-custom-style',
                 zIndex: 9999 // Force high z-index
             })
         } catch (e) {
@@ -95,14 +95,8 @@ onUnmounted(() => {
     box-sizing: border-box;
 }
 
-/* 强制通知居中显示 */
-.notification-center-override {
-    width: 800px !important;
-    top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%);
-    margin: 0 !important;
-    right: auto !important;
-    bottom: auto !important;
+/* 自定义通知样式 */
+.notification-custom-style {
+    width: 450px !important;
 }
 </style>
