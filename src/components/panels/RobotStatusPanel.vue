@@ -507,25 +507,43 @@ const parseStatusString = (statusString: string): RobotStatus => {
 }
 
 // 温度保护状态
-// const isTempProtectionActive = ref(false) // Replace with store
+const lastProtectionCmdTime = ref(0) // 上次发送保护指令的时间
+const isFirstCheckAfterConnect = ref(true) // 连接后是否首次检查
 
 // 检查温度并执行保护逻辑
 const checkTemperatureProtection = (status: RobotStatus) => {
     const maxTemp = status.motor_hottest_temp
     if (maxTemp === undefined) return
     const isTempProtectionActive = rosStore.isTempProtectionTriggered
+    const now = Date.now()
 
-    if (maxTemp > 70 && !isTempProtectionActive) {
-        // 触发高温保护
-        rosStore.setTempProtectionTriggered(true)
-        rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'stop' })
-        ElMessage.error(`警告：电机温度过高 (${maxTemp.toFixed(1)}°C)，已发送停止指令！`)
+    // 只要温度超过 70 度
+    if (maxTemp > 70) {
+        // 如果未触发标志，或者这是连接后的第一次检查（用于同步后台状态），则发送指令
+        if (!isTempProtectionActive || isFirstCheckAfterConnect.value) {
+             // 触发高温保护
+            rosStore.setTempProtectionTriggered(true)
+            rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'stop' })
+            
+            // 只有当状态是首次触发，才弹窗
+             if (!isTempProtectionActive || isFirstCheckAfterConnect.value) {
+                // 避免短时间内重复弹窗 (例如重连时)
+                if (now - lastProtectionCmdTime.value > 5000) {
+                    ElMessage.error(`警告：电机温度过高 (${maxTemp.toFixed(1)}°C)，已发送停止指令！`)
+                }
+             }
+             lastProtectionCmdTime.value = now
+        }
     } else if (maxTemp < 56 && isTempProtectionActive) {
         // 解除高温保护
         rosStore.setTempProtectionTriggered(false)
         rosConnection.publish('/temStatus', 'std_msgs/String', { data: 'start' })
         ElMessage.success(`电机温度已恢复正常 (${maxTemp.toFixed(1)}°C)，已发送启动指令。`)
+        lastProtectionCmdTime.value = 0
     }
+    
+    // 标记首次检查已完成
+    isFirstCheckAfterConnect.value = false
 }
 
 // 处理状态消息
@@ -556,6 +574,8 @@ const handleStatusMessage = (message: RosMessage) => {
 }// 监听ROS连接状态，连接成功后订阅话题
 watch(() => rosStore.isConnected, (connected) => {
     if (connected) {
+        // 重置首次检查标志，确保重连后会同步一次高温保护状态
+        isFirstCheckAfterConnect.value = true
         subscribeToStatus()
     }
 }, { immediate: true })

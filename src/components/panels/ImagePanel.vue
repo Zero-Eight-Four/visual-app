@@ -296,6 +296,7 @@ const handleImageMessage = (message: RosMessage) => {
 // const isAutoCapturing = ref(false) // Replace with store state
 const isAutoCapturing = computed(() => rosStore.isAutoCapturing)
 let velocityTimer: ReturnType<typeof setInterval> | null = null
+let ptzTimer: ReturnType<typeof setTimeout> | null = null
 
 // 发布速度指令控制机器狗
 /*
@@ -316,16 +317,16 @@ const publishVelocity = async (angularZ: number) => {
 const publishPtzCommand = async (command: string) => {
     // 映射命令到新的话题 (根据 ImageSettings.vue 中的定义)
     const topicMap: Record<string, string> = {
-        'rotate_up': '/siyi_camera_control/rotate_up',
-        'rotate_down': '/siyi_camera_control/rotate_down',
-        'rotate_left': '/siyi_camera_control/rotate_left',
-        'rotate_right': '/siyi_camera_control/rotate_right',
-        'zoom_in': '/siyi_camera_control/zoom_in',
-        'zoom_out': '/siyi_camera_control/zoom_out',
-        'center': '/siyi_camera_control/ptz_stop',
-        'stop': '/siyi_camera_control/ptz_stop',
-        'spin_left': '/siyi_camera_control/ptz_spin_left',
-        'spin_right': '/siyi_camera_control/ptz_spin_right'
+        'rotate_up': '/camera_control/tilt_up',
+        'rotate_down': '/camera_control/tilt_down',
+        'rotate_left': '/camera_control/continuous_pan_left',
+        'rotate_right': '/camera_control/continuous_pan_right',
+        'zoom_in': '/camera_control/zoom_in',
+        'zoom_out': '/camera_control/zoom_out',
+        'center': '/camera_control/center',
+        'stop': '/camera_control/stop',
+        'spin_left': '/camera_control/continuous_pan_left',
+        'spin_right': '/camera_control/continuous_pan_right'
     }
 
     const topic = topicMap[command]
@@ -339,17 +340,15 @@ const publishPtzCommand = async (command: string) => {
 }
 
 const stopAutoCapture = async () => {
-    // 停止机器狗旋转
-    /*
-    if (velocityTimer) {
-        clearInterval(velocityTimer)
-        velocityTimer = null
+    // 清除 PTZ 定时器
+    if (ptzTimer) {
+        clearTimeout(ptzTimer)
+        ptzTimer = null
     }
-    await publishVelocity(0)
-    */
 
-    // 停止 PTZ (保险起见)
+    // 停止 PTZ 并归中
     await publishPtzCommand('stop')
+    await publishPtzCommand('center')
     
     rosStore.setAutoCapturing(false) // Update store
     
@@ -387,21 +386,33 @@ const startAutoCapture = async (folderName: string) => {
     }
     */
 
-    // 1. 开始旋转机器狗
-    // 5秒旋转360度(2pi) -> angular.z ≈ 1.256 rad/s
-    // 负值向右旋转（顺时针）
-    /*
-    const angularVelocity = -0.8
+    // 1. 开始旋转摄像头
+    // 先向左旋转
+    await publishPtzCommand('rotate_left')
     
-    publishVelocity(angularVelocity)
-    velocityTimer = setInterval(() => {
-        publishVelocity(angularVelocity)
-    }, 100) // 10Hz 频率发布速度指令
-    */
+    // 6秒后停止
+    ptzTimer = setTimeout(async () => {
+        await publishPtzCommand('stop')
+        
+        // 停顿1秒让云台完全停止，然后开始向右旋转
+        ptzTimer = setTimeout(async () => {
+            await publishPtzCommand('rotate_right')
+
+            // 12秒后停止
+            ptzTimer = setTimeout(async () => {
+                await publishPtzCommand('stop')
+
+                // 停顿1秒让云台完全停止，然后归中
+                ptzTimer = setTimeout(async () => {
+                    await publishPtzCommand('center')
+                }, 1000)
+            }, 8000)
+        }, 1000)
+    }, 5000)
     
-    // 2. 采集循环
-    const captureInterval = 500 // 500ms 采集一次 (配合更快的旋转速度)
-    const duration = 8000 // 8秒旋转一周
+    // 2. 采集循
+    const captureInterval = 1000 // 1000ms 采集一次
+    const duration = 20000 // 6s左 + 1s停 + 12s右 + 1s停 + 归中及冗余
     const startTime = Date.now()
     
     const captureTimer = setInterval(async () => {
@@ -645,6 +656,11 @@ onUnmounted(() => {
     // 清理速度发布定时器
     if (velocityTimer) {
         clearInterval(velocityTimer)
+    if (ptzTimer) {
+        clearTimeout(ptzTimer)
+        ptzTimer = null
+    }
+
         velocityTimer = null
     }
 

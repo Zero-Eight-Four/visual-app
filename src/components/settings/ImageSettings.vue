@@ -77,7 +77,12 @@
                         <div class="ptz-row">
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowLeft" circle size="small"
-                                    @click="publishPtzCommand('rotate_left')" title="左转" />
+                                    @mousedown="publishPtzCommand('rotate_left')" 
+                                    @mouseup="publishPtzCommand('stop')"
+                                    @mouseleave="publishPtzCommand('stop')"
+                                    @touchstart.prevent="publishPtzCommand('rotate_left')"
+                                    @touchend.prevent="publishPtzCommand('stop')"
+                                    title="左转（按住旋转）" />
                             </div>
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn ptz-stop" circle size="small"
@@ -89,7 +94,12 @@
                             </div>
                             <div class="ptz-cell">
                                 <el-button class="ptz-btn" :icon="ArrowRight" circle size="small"
-                                    @click="publishPtzCommand('rotate_right')" title="右转" />
+                                    @mousedown="publishPtzCommand('rotate_right')" 
+                                    @mouseup="publishPtzCommand('stop')"
+                                    @mouseleave="publishPtzCommand('stop')"
+                                    @touchstart.prevent="publishPtzCommand('rotate_right')"
+                                    @touchend.prevent="publishPtzCommand('stop')"
+                                    title="右转（按住旋转）" />
                             </div>
                         </div>
                         <div class="ptz-row">
@@ -118,11 +128,21 @@
                             <span class="control-label">旋转</span>
                             <div class="control-buttons">
                                 <el-button class="ptz-btn" :icon="RefreshLeft" circle size="small"
-                                    @click="publishPtzCommand('spin_left')" title="持续左转" />
+                                    @mousedown="publishPtzCommand('spin_left')" 
+                                    @mouseup="publishPtzCommand('stop')"
+                                    @mouseleave="publishPtzCommand('stop')"
+                                    @touchstart.prevent="publishPtzCommand('spin_left')"
+                                    @touchend.prevent="publishPtzCommand('stop')"
+                                    title="持续左转（按住）" />
                                 <el-button class="ptz-btn" :icon="VideoPause" circle size="small"
                                     @click="publishPtzCommand('stop')" title="停止" />
                                 <el-button class="ptz-btn" :icon="RefreshRight" circle size="small"
-                                    @click="publishPtzCommand('spin_right')" title="持续右转" />
+                                    @mousedown="publishPtzCommand('spin_right')" 
+                                    @mouseup="publishPtzCommand('stop')"
+                                    @mouseleave="publishPtzCommand('stop')"
+                                    @touchstart.prevent="publishPtzCommand('spin_right')"
+                                    @touchend.prevent="publishPtzCommand('stop')"
+                                    title="持续右转（按住）" />
                             </div>
                         </div>
     
@@ -320,16 +340,16 @@ watch(() => settingsStore.selectedTopic, (val) => { selectedTopic.value = val })
 const publishPtzCommand = async (command: string) => {
     // 映射命令到新的话题
     const topicMap: Record<string, string> = {
-        'rotate_up': '/siyi_camera_control/rotate_up',
-        'rotate_down': '/siyi_camera_control/rotate_down',
-        'rotate_left': '/siyi_camera_control/rotate_left',
-        'rotate_right': '/siyi_camera_control/rotate_right',
-        'zoom_in': '/siyi_camera_control/zoom_in',
-        'zoom_out': '/siyi_camera_control/zoom_out',
-        'center': '/siyi_camera_control/center',
-        'stop': '/siyi_camera_control/ptz_stop',
-        'spin_left': '/siyi_camera_control/ptz_spin_left',
-        'spin_right': '/siyi_camera_control/ptz_spin_right'
+        'rotate_up': '/camera_control/tilt_up',
+        'rotate_down': '/camera_control/tilt_down',
+        'rotate_left': '/camera_control/continuous_pan_left',
+        'rotate_right': '/camera_control/continuous_pan_right',
+        'zoom_in': '/camera_control/zoom_in',
+        'zoom_out': '/camera_control/zoom_out',
+        'center': '/camera_control/center',
+        'stop': '/camera_control/stop',
+        'spin_left': '/camera_control/continuous_pan_left',
+        'spin_right': '/camera_control/continuous_pan_right'
     }
 
     const topic = topicMap[command]
