@@ -913,6 +913,34 @@ app.delete('/api/local/reports/delete', async (req, res) => {
     }
 });
 
+function resolveRobotFileServiceEndpoint(robotUrlRaw) {
+    const robotUrl = new URL(robotUrlRaw);
+    const isWs = robotUrl.protocol === 'ws:' || robotUrl.protocol === 'wss:';
+    const protocol = isWs
+        ? (robotUrl.protocol === 'wss:' ? 'https:' : 'http:')
+        : robotUrl.protocol;
+
+    let port;
+    if (isWs) {
+        const rosPort = parseInt(robotUrl.port || '9090', 10);
+        port = rosPort - 9090 + 8080;
+    } else {
+        port = robotUrl.port
+            ? parseInt(robotUrl.port, 10)
+            : (protocol === 'https:' ? 443 : 80);
+    }
+
+    if (!Number.isFinite(port) || port <= 0) {
+        throw new Error(`Invalid robot file service port resolved from URL: ${robotUrlRaw}`);
+    }
+
+    return {
+        host: robotUrl.hostname,
+        port,
+        isHttps: protocol === 'https:'
+    };
+}
+
 app.post('/api/maps/download-from-robot', async (req, res) => {
     let mapNameForCleanup = null;
     try {
@@ -945,10 +973,10 @@ app.post('/api/maps/download-from-robot', async (req, res) => {
             return;
         }
 
-        const robotUrlObj = new URL(robotUrl);
-        const robotHost = robotUrlObj.hostname;
-        const robotPort = parseInt(robotUrlObj.port || '8080', 10);
-        const isHttps = robotUrlObj.protocol === 'https:';
+        const robotEndpoint = resolveRobotFileServiceEndpoint(robotUrl);
+        const robotHost = robotEndpoint.host;
+        const robotPort = robotEndpoint.port;
+        const isHttps = robotEndpoint.isHttps;
         const requestModule = isHttps ? https : http;
         const apiPrefix = '/api/files';
 
@@ -1240,10 +1268,10 @@ app.post('/api/images/download-from-robot', async (req, res) => {
 
         await mkdir(targetFolder, { recursive: true })
 
-        const robot = new URL(robotUrl)
-        const protocolModule = robot.protocol === 'https:' ? https : http
-        const robotHost = robot.hostname
-        const robotPort = parseInt(robot.port || '8080', 10)
+        const robotEndpoint = resolveRobotFileServiceEndpoint(robotUrl)
+        const protocolModule = robotEndpoint.isHttps ? https : http
+        const robotHost = robotEndpoint.host
+        const robotPort = robotEndpoint.port
         const apiPrefix = '/api/files'
 
         // 健康检查
@@ -1457,10 +1485,10 @@ app.post('/api/maps/send-to-robot', async (req, res) => {
         }
 
         // Parse robot URL
-        const robotUrlObj = new URL(robotUrl);
-        const robotHost = robotUrlObj.hostname;
-        const robotPort = parseInt(robotUrlObj.port || '8080', 10);
-        const isHttps = robotUrlObj.protocol === 'https:';
+        const robotEndpoint = resolveRobotFileServiceEndpoint(robotUrl);
+        const robotHost = robotEndpoint.host;
+        const robotPort = robotEndpoint.port;
+        const isHttps = robotEndpoint.isHttps;
         const requestModule = isHttps ? https : http;
         const apiPrefix = '/api/files';
 
@@ -1976,6 +2004,139 @@ app.post('/api/notification', (req, res) => {
 
     res.json({ success: true, count: sseClients.length });
 });
+
+// 机器人文件服务代理（避免浏览器直连机器人端口触发 CORS）
+app.use('/api/robot-files', async (req, res) => {
+    try {
+        const host = req.headers.host || 'localhost'
+        const currentUrl = new URL(req.originalUrl, `http://${host}`)
+        const robotUrlParam = currentUrl.searchParams.get('robotUrl')
+
+        if (!robotUrlParam) {
+            res.status(400).json({ success: false, message: 'Missing robotUrl query parameter' })
+            return
+        }
+
+        let robotBases = []
+        try {
+            const robotUrl = new URL(robotUrlParam)
+            if (robotUrl.protocol === 'ws:' || robotUrl.protocol === 'wss:') {
+                const rosPort = parseInt(robotUrl.port || '9090', 10)
+                const robotHttpPort = rosPort - 9090 + 8080
+                const protocol = robotUrl.protocol === 'wss:' ? 'https:' : 'http:'
+                const customFilePort = parseInt(currentUrl.searchParams.get('robotFilePort') || '', 10)
+                const candidates = []
+
+                if (Number.isFinite(customFilePort) && customFilePort > 0) {
+                    candidates.push(customFilePort)
+                }
+
+                // Follow strict offset mapping: ROS 909x -> files 808x.
+                if (Number.isFinite(robotHttpPort) && robotHttpPort > 0) {
+                    candidates.push(robotHttpPort)
+                }
+
+                const uniquePorts = [...new Set(candidates)]
+                robotBases = uniquePorts.map((port) => `${protocol}//${robotUrl.hostname}:${port}`)
+            } else {
+                const protocol = robotUrl.protocol
+                const port = robotUrl.port ? parseInt(robotUrl.port, 10) : (protocol === 'https:' ? 443 : 80)
+                robotBases = [`${protocol}//${robotUrl.hostname}:${port}`]
+            }
+        } catch {
+            res.status(400).json({ success: false, message: 'Invalid robotUrl' })
+            return
+        }
+
+        if (robotBases.length === 0) {
+            res.status(400).json({ success: false, message: 'Unable to resolve robot file service address' })
+            return
+        }
+
+        const proxyPath = currentUrl.pathname.replace('/api/robot-files', '') || ''
+        const makeTargetUrl = (base) => {
+            const targetUrl = new URL(`/api/files${proxyPath}`, base)
+            // 透传除 robotUrl 之外的查询参数
+            for (const [key, value] of currentUrl.searchParams.entries()) {
+                if (key !== 'robotUrl' && key !== 'robotFilePort') {
+                    targetUrl.searchParams.append(key, value)
+                }
+            }
+            return targetUrl
+        }
+
+        const method = req.method || 'GET'
+        const headers = { ...req.headers }
+        delete headers.host
+        // Remove hop-by-hop headers before forwarding with fetch/undici.
+        delete headers.connection
+        delete headers.upgrade
+        delete headers['keep-alive']
+        delete headers['proxy-authenticate']
+        delete headers['proxy-authorization']
+        delete headers.te
+        delete headers.trailer
+        delete headers['transfer-encoding']
+        delete headers['content-length']
+
+        let requestBody = undefined
+        if (method !== 'GET' && method !== 'HEAD') {
+            const chunks = []
+            for await (const chunk of req) {
+                chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+            }
+            if (chunks.length > 0) {
+                requestBody = Buffer.concat(chunks)
+            }
+        }
+
+        let response = null
+        let lastError = null
+        for (const robotBase of robotBases) {
+            const targetUrl = makeTargetUrl(robotBase)
+            try {
+                response = await fetch(targetUrl.toString(), {
+                    method,
+                    headers,
+                    body: requestBody,
+                    redirect: 'manual'
+                })
+                break
+            } catch (error) {
+                lastError = error
+                console.warn('Robot files proxy target failed:', {
+                    target: targetUrl.toString(),
+                    error: error instanceof Error ? error.message : String(error)
+                })
+            }
+        }
+
+        if (!response) {
+            throw lastError || new Error('Failed to reach robot file service')
+        }
+
+        res.status(response.status)
+
+        const contentType = response.headers.get('content-type')
+        const contentLength = response.headers.get('content-length')
+        const contentDisposition = response.headers.get('content-disposition')
+        const cacheControl = response.headers.get('cache-control')
+
+        if (contentType) res.setHeader('Content-Type', contentType)
+        if (contentLength) res.setHeader('Content-Length', contentLength)
+        if (contentDisposition) res.setHeader('Content-Disposition', contentDisposition)
+        if (cacheControl) res.setHeader('Cache-Control', cacheControl)
+
+        const buffer = Buffer.from(await response.arrayBuffer())
+        res.send(buffer)
+    } catch (error) {
+        console.error('Robot files proxy error:', error)
+        res.status(502).json({
+            success: false,
+            message: error instanceof Error ? error.message : 'Robot files proxy failed'
+        })
+    }
+})
 
 // Proxy all other API requests to Python backend
 app.use('/api', createProxyMiddleware({

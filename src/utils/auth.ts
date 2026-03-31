@@ -7,7 +7,15 @@ export function getCookie(name: string): string | null {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
     if (parts.length === 2) {
-        return parts.pop()?.split(';').shift() || null;
+        const raw = parts.pop()?.split(';').shift() || null;
+        if (!raw) return null;
+
+        // Cookie 值可能经过 URL 编码（例如 Bearer%20token），这里统一解码。
+        try {
+            return decodeURIComponent(raw);
+        } catch {
+            return raw;
+        }
     }
     return null;
 }

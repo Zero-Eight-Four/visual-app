@@ -16,6 +16,8 @@ import { API_BASE_URL } from '@/config'
 export interface HttpFileTransferConfig {
   baseUrl: string // 例如: http://192.168.1.100:8080
   apiPrefix?: string // 例如: /api/files
+  robotUrl?: string // 机器人 ROS/HTTP 地址，用于后端代理路由
+  robotFilePort?: number // 可选：显式指定机器人文件服务端口（覆盖后端默认推导）
   timeout?: number // 请求超时时间（毫秒）
 }
 
@@ -53,6 +55,28 @@ export class HttpFileTransferClient {
   }
 
   /**
+   * 构造请求 URL，并附带代理所需的机器人参数
+   */
+  private buildRequestUrl(endpoint: string): string {
+    let url = this.getApiUrl(endpoint)
+
+    if (!this.config.robotUrl) {
+      return url
+    }
+
+    const isAbsolute = /^https?:\/\//i.test(url)
+    const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+    const parsedUrl = new URL(url, baseOrigin)
+
+    parsedUrl.searchParams.set('robotUrl', this.config.robotUrl)
+    if (Number.isFinite(this.config.robotFilePort) && (this.config.robotFilePort || 0) > 0) {
+      parsedUrl.searchParams.set('robotFilePort', String(this.config.robotFilePort))
+    }
+
+    return isAbsolute ? parsedUrl.toString() : `${parsedUrl.pathname}${parsedUrl.search}`
+  }
+
+  /**
    * 获取 base URL（用于调试）
    */
   getBaseUrl(): string {
@@ -63,7 +87,8 @@ export class HttpFileTransferClient {
    * 发送 HTTP 请求
    */
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = this.getApiUrl(endpoint)
+    const url = this.buildRequestUrl(endpoint)
+
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.config.timeout)
 
@@ -132,7 +157,7 @@ export class HttpFileTransferClient {
     // 使用 XMLHttpRequest 以支持上传进度
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest()
-      const url = this.getApiUrl('/upload')
+      const url = this.buildRequestUrl('/upload')
 
       console.log(`[uploadFile] 开始上传到: ${url}, 文件: ${file.name}, 大小: ${(file.size / 1024 / 1024).toFixed(2)} MB, 目标路径: ${destinationPath}`)
 
@@ -231,7 +256,7 @@ export class HttpFileTransferClient {
     const params = new URLSearchParams({ path: remotePath })
     // 添加时间戳参数避免缓存，同时不触发 CORS 预检请求
     params.append('_t', Date.now().toString())
-    const url = this.getApiUrl(`/download?${params.toString()}`)
+    const url = this.buildRequestUrl(`/download?${params.toString()}`)
 
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
@@ -447,26 +472,31 @@ export class HttpFileTransferClient {
 /**
  * 从 WebSocket URL 提取 HTTP URL
  * 例如: ws://192.168.1.100:9090 -> http://192.168.1.100:8080
+ * 例如: ws://192.168.1.100:9091 -> http://192.168.1.100:8081
  * 确保不使用 localhost 或 127.0.0.1，避免与本地开发服务器冲突
  */
-export function extractHttpUrlFromWsUrl(wsUrl: string, httpPort: number = 8080): string {
+export function extractHttpUrlFromWsUrl(wsUrl: string, httpPort?: number): string {
   try {
     const url = new URL(wsUrl)
     const hostname = url.hostname
     const protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
+    const rosPort = parseInt(url.port || '9090', 10)
+    const mappedPort = rosPort - 9090 + 8080
+    const finalPort = Number.isFinite(httpPort) && (httpPort || 0) > 0 ? (httpPort as number) : mappedPort
 
     // 如果 hostname 是 localhost 或 127.0.0.1，抛出错误
     // if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
     //   throw new Error('不能使用 localhost 连接机器狗，请使用机器狗的实际 IP 地址')
     // }
 
-    return `${protocol}//${hostname}:${httpPort}`
+    return `${protocol}//${hostname}:${finalPort}`
   } catch (error) {
     // 如果解析失败，尝试简单替换
+    const fallbackPort = Number.isFinite(httpPort) && (httpPort || 0) > 0 ? (httpPort as number) : 8080
     let httpUrl = wsUrl
       .replace('ws://', 'http://')
       .replace('wss://', 'https://')
-      .replace(/:\d+/, `:${httpPort}`)
+      .replace(/:\d+/, `:${fallbackPort}`)
 
     // 检查是否包含 localhost
     // if (httpUrl.includes('localhost') || httpUrl.includes('127.0.0.1')) {
@@ -483,51 +513,13 @@ export function extractHttpUrlFromWsUrl(wsUrl: string, httpPort: number = 8080):
  */
 export function createHttpFileTransferClient(
   wsUrl: string,
-  httpPort: number = 8080
+  httpPort?: number
 ): HttpFileTransferClient {
-  // 尝试检测是否需要使用 Nginx 代理来避免 CORS 问题
-  // 注意：如果 Nginx 配置不正确（例如 /robot-files/ 代理到了 ROS 端口），会导致 WebSocket 握手超时错误
-  // 因此这里暂时禁用自动代理检测，优先使用直连。如果遇到 CORS 问题，请检查服务端 CORS 配置或 Nginx 配置。
-  /*
-  try {
-    if (typeof window !== 'undefined') {
-      let targetUrlStr = wsUrl
-        .replace('ws://', 'http://')
-        .replace('wss://', 'https://')
-
-      // 如果没有替换成功（可能是其他格式），尝试用 URL 解析
-      if (targetUrlStr === wsUrl) {
-        try {
-          const u = new URL(wsUrl);
-          u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
-          targetUrlStr = u.toString();
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      const targetUrl = new URL(targetUrlStr)
-      const currentHostname = window.location.hostname
-
-      // 如果目标主机与当前页面主机相同（例如都是 8.148.247.53）
-      // 且端口不同（页面是 80/443，目标是 9090/8080），则会触发 CORS
-      // 此时优先使用 Nginx 代理路径 /robot-files/
-      if (targetUrl.hostname === currentHostname) {
-        console.log('[Debug] Detected same-origin target, using /robot-files proxy to avoid CORS')
-        return new HttpFileTransferClient({
-          baseUrl: '/robot-files', // 使用相对路径，且不带末尾斜杠
-          apiPrefix: '/api/files'
-        })
-      }
-    }
-  } catch (e) {
-    console.warn('[Debug] Failed to check origin for proxy:', e)
-  }
-  */
-
-  const baseUrl = extractHttpUrlFromWsUrl(wsUrl, httpPort)
+  // 统一走后端代理，避免浏览器直连机器人文件服务端口导致 CORS/网络策略问题。
   return new HttpFileTransferClient({
-    baseUrl,
-    apiPrefix: '/api/files' // 机器狗 API 前缀
+    baseUrl: '',
+    apiPrefix: `${API_BASE_URL}/robot-files`,
+    robotUrl: wsUrl,
+    robotFilePort: Number.isFinite(httpPort) && (httpPort || 0) > 0 ? httpPort : undefined
   })
 }

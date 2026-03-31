@@ -615,6 +615,27 @@ const formatTime = (seconds: number): string => {
     }
 }
 
+// 从 ROS WebSocket 地址推导机器狗文件服务地址：909x -> 808x
+const getRobotFileServicePortFromWs = (wsUrl: string): number => {
+    const wsUrlObj = new URL(wsUrl)
+    const rosPort = parseInt(wsUrlObj.port || '9090', 10)
+    const filePort = rosPort - 9090 + 8080
+
+    if (!Number.isFinite(filePort) || filePort <= 0) {
+        throw new Error(`无法根据 ROS 端口推导文件服务端口: ${wsUrlObj.port || '9090'}`)
+    }
+
+    return filePort
+}
+
+const getRobotFileServiceUrlFromWs = (wsUrl: string): string => {
+    const wsUrlObj = new URL(wsUrl)
+    const protocol = wsUrlObj.protocol === 'wss:' ? 'https:' : 'http:'
+    const filePort = getRobotFileServicePortFromWs(wsUrl)
+
+    return `${protocol}//${wsUrlObj.hostname}:${filePort}`
+}
+
 const availableMaps = ref<MapInfo[]>([])
 const currentMap = ref<MapInfo | null>(null)
 const selectedMapForEdit = ref<MapInfo | null>(null)
@@ -699,9 +720,7 @@ const handleUploadTopicMessage = async (message: any) => {
     }
 
     try {
-        const wsUrlObj = new URL(wsUrl)
-        const protocol = wsUrlObj.protocol === 'wss:' ? 'https:' : 'http:'
-        const robotHttpUrl = `${protocol}//${wsUrlObj.hostname}:8080`
+        const robotHttpUrl = getRobotFileServiceUrlFromWs(wsUrl)
 
         const response = await fetch(`${API_BASE_URL}/images/download-from-robot`, {
             method: 'POST',
@@ -961,8 +980,19 @@ const subscribeMappingStatus = async () => {
                         }
                     } else {
                         // 字符串格式（向后兼容旧格式）
-                        isRunning = statusStr.includes('status:mapping_running') || statusStr.includes('"status":"mapping_running"')
-                        isStopped = statusStr.includes('status:mapping_stopped') || statusStr.includes('"status":"mapping_stopped"')
+                        const normalizedStatus = statusStr.trim().toLowerCase()
+
+                        isRunning = normalizedStatus.includes('status:mapping_running') || normalizedStatus.includes('"status":"mapping_running"')
+                        isStopped = normalizedStatus.includes('status:mapping_stopped') || normalizedStatus.includes('"status":"mapping_stopped"')
+
+                        // 兼容格式：fastlio:running,pid:118952 / fastlio:stopped,pid:118952
+                        if (!isRunning && !isStopped) {
+                            const simpleStatusMatch = normalizedStatus.match(/^[^:,]+:(running|stopped)\b/)
+                            if (simpleStatusMatch) {
+                                isRunning = simpleStatusMatch[1] === 'running'
+                                isStopped = simpleStatusMatch[1] === 'stopped'
+                            }
+                        }
                     }
 
                     if (isRunning) {
@@ -1207,9 +1237,7 @@ const confirmUploadMap = async () => {
             }
 
             // 从 WebSocket URL 提取机器狗的 HTTP URL
-            const wsUrlObj = new URL(wsUrl)
-            const protocol = wsUrlObj.protocol === 'wss:' ? 'https:' : 'http:'
-            const robotHttpUrl = `${protocol}//${wsUrlObj.hostname}:8080`
+            const robotHttpUrl = getRobotFileServiceUrlFromWs(wsUrl)
 
             // 初始化进度状态
             uploadMapTotalSize.value = 0
@@ -1250,7 +1278,7 @@ const confirmUploadMap = async () => {
                         if (errorData.error) {
                             errorMessage = errorData.error
                             if (errorMessage.includes('无法连接到机器狗文件服务') || errorMessage.includes('ECONNREFUSED')) {
-                                errorMessage = '无法连接到机器狗文件服务，请确保：\n1. 机器狗上的文件传输服务正在运行 (file_transfer_api.py)\n2. 端口 8080 未被防火墙阻止\n3. 网络连接正常'
+                                errorMessage = '无法连接到机器狗文件服务，请确保：\n1. 机器狗上的文件传输服务正在运行 (file_transfer_api.py)\n2. 文件服务端口与 ROS 端口映射正确（909x -> 808x，例如 9091 对应 8081）\n3. 网络连接正常'
                             }
                         }
                     } catch {
@@ -1626,7 +1654,7 @@ const handleDownloadFromRobot = async () => {
         }
 
         // 创建 HTTP 文件传输客户端
-        const httpClient = createHttpFileTransferClient(wsUrl, 8080)
+        const httpClient = createHttpFileTransferClient(wsUrl, getRobotFileServicePortFromWs(wsUrl))
 
         // 1. 列出机器狗 map 目录的文件（包含大小信息）
         let mapFiles: Array<{ name: string; path: string; size: number }> = []
@@ -1877,8 +1905,8 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             // URL 解析失败，继续尝试
         }
 
-        // 创建 HTTP 客户端，使用机器狗的 IP 和 8080 端口（不是本地 3000 端口）
-        const httpClient = createHttpFileTransferClient(wsUrl, 8080)
+        // 创建 HTTP 客户端，使用 ROS 端口映射出的文件服务端口（909x -> 808x）
+        const httpClient = createHttpFileTransferClient(wsUrl, getRobotFileServicePortFromWs(wsUrl))
         
         // 打印调试信息
         console.log(`[sendMapToRobot] WebSocket URL: ${wsUrl}`)
@@ -2036,9 +2064,7 @@ const sendMapToRobot = async (mapInfo: MapInfo) => {
             console.log(`[sendMapToRobot] 调用服务器端转发 API，文件数量: ${allFilesToUpload.length}`)
             
             // 从 WebSocket URL 提取机器狗的 HTTP URL
-            const wsUrlObj = new URL(wsUrl)
-            const protocol = wsUrlObj.protocol === 'wss:' ? 'https:' : 'http:'
-            const robotHttpUrl = `${protocol}//${wsUrlObj.hostname}:8080`
+            const robotHttpUrl = getRobotFileServiceUrlFromWs(wsUrl)
             
             const response = await fetch(`${API_BASE_URL}/maps/send-to-robot`, {
                 method: 'POST',
