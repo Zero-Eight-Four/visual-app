@@ -1,16 +1,19 @@
 <template>
-    <div class="settings-panel">
-        <el-form label-position="top" size="small">
-            <div class="settings-section">
-                <h4 class="section-title">
-                    AI识别设置
-                </h4>
-                <div class="placeholder-info">
-                    功能开发中...
-                </div>
-            </div>
-        </el-form>
-    </div>
+  <div class="settings-panel">
+    <el-form
+      label-position="top"
+      size="small"
+    >
+      <div class="settings-section">
+        <h4 class="section-title">
+          AI识别设置
+        </h4>
+        <div class="placeholder-info">
+          功能开发中...
+        </div>
+      </div>
+    </el-form>
+  </div>
 </template>
 
 <script setup lang="ts">

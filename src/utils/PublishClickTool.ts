@@ -108,7 +108,7 @@ export class PublishClickTool {
       const color = type === 'pose_estimate' ? 0x00ffff : 0xff00ff
       this.arrow.children.forEach((child) => {
         if (child instanceof THREE.Mesh) {
-          ;(child.material as THREE.MeshBasicMaterial).color.setHex(color)
+          (child.material as THREE.MeshBasicMaterial).color.setHex(color)
         }
       })
     }

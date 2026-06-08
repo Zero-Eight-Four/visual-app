@@ -1,36 +1,68 @@
 <template>
-    <div class="image-panel">
-        <div v-if="rosStore.loadingTopics" class="loading-topics">
-            <el-icon class="is-loading"><Loading /></el-icon>
-            <p>正在获取话题列表...</p>
-        </div>
-        <div v-else-if="fetchError" class="no-topic error-state">
-            <el-icon class="error-icon"><Warning /></el-icon>
-            <p>获取话题列表失败: {{ fetchError }}</p>
-            <el-button type="primary" size="small" @click="retryFetchTopics">重试</el-button>
-        </div>
-        <div v-else-if="!selectedTopic" class="no-topic">
-            <p>请在右侧设置中选择摄像头</p>
-        </div>
-        <div v-else class="image-container">
-            <canvas ref="imageCanvas" class="image-canvas"></canvas>
-            <div v-if="!hasImage" class="loading">
-                <el-icon class="is-loading">
-                    <Loading />
-                </el-icon>
-                <span>等待图像数据...</span>
-            </div>
-            <!-- 放大/缩小按钮 -->
-            <div class="fullscreen-btn">
-                <el-button size="small" @click="toggleFullscreen" :title="isExpanded ? '恢复大小' : '放大显示'">
-                    <el-icon>
-                        <FullScreen v-if="!isExpanded" />
-                        <Close v-else />
-                    </el-icon>
-                </el-button>
-            </div>
-        </div>
+  <div class="image-panel">
+    <div
+      v-if="rosStore.loadingTopics"
+      class="loading-topics"
+    >
+      <el-icon class="is-loading">
+        <Loading />
+      </el-icon>
+      <p>正在获取话题列表...</p>
     </div>
+    <div
+      v-else-if="fetchError"
+      class="no-topic error-state"
+    >
+      <el-icon class="error-icon">
+        <Warning />
+      </el-icon>
+      <p>获取话题列表失败: {{ fetchError }}</p>
+      <el-button
+        type="primary"
+        size="small"
+        @click="retryFetchTopics"
+      >
+        重试
+      </el-button>
+    </div>
+    <div
+      v-else-if="!selectedTopic"
+      class="no-topic"
+    >
+      <p>请在右侧设置中选择摄像头</p>
+    </div>
+    <div
+      v-else
+      class="image-container"
+    >
+      <canvas
+        ref="imageCanvas"
+        class="image-canvas"
+      />
+      <div
+        v-if="!hasImage"
+        class="loading"
+      >
+        <el-icon class="is-loading">
+          <Loading />
+        </el-icon>
+        <span>等待图像数据...</span>
+      </div>
+      <!-- 放大/缩小按钮 -->
+      <div class="fullscreen-btn">
+        <el-button
+          size="small"
+          :title="isExpanded ? '恢复大小' : '放大显示'"
+          @click="toggleFullscreen"
+        >
+          <el-icon>
+            <FullScreen v-if="!isExpanded" />
+            <Close v-else />
+          </el-icon>
+        </el-button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">

@@ -1,76 +1,152 @@
 <template>
-    <el-dialog v-model="visible" title="连接到机器狗" width="500px" :close-on-click-modal="false">
-        <el-form :model="form" label-width="100px">
-            <el-form-item label="选择连接" prop="url">
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <el-select id="ros-websocket-url" ref="selectRef" v-model="form.url" filterable placeholder="请选择连接"
-                        style="flex: 1;" @keyup.enter="handleConnect">
-                        <el-option v-for="historyItem in connectionHistory" :key="historyItem.url"
-                            :label="historyItem.name" :value="historyItem.url">
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                                <span>{{ historyItem.name }}</span>
-                                <el-button size="small" text type="primary" @click.stop="editConnection(historyItem)">
-                                    编辑
-                                </el-button>
-                            </div>
-                        </el-option>
-                    </el-select>
-                    <el-button type="primary" :icon="Plus" @click="showAddConnectionDialog" plain>
-                        新增连接
-                    </el-button>
-                </div>
-            </el-form-item>
-        </el-form>
+  <el-dialog
+    v-model="visible"
+    title="连接到机器狗"
+    width="500px"
+    :close-on-click-modal="false"
+  >
+    <el-form
+      :model="form"
+      label-width="100px"
+    >
+      <el-form-item
+        label="选择连接"
+        prop="url"
+      >
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <el-select
+            id="ros-websocket-url"
+            ref="selectRef"
+            v-model="form.url"
+            filterable
+            placeholder="请选择连接"
+            style="flex: 1;"
+            @keyup.enter="handleConnect"
+          >
+            <el-option
+              v-for="historyItem in connectionHistory"
+              :key="historyItem.url"
+              :label="historyItem.name"
+              :value="historyItem.url"
+            >
+              <div
+                style="display: flex; justify-content: space-between; align-items: center; width: 100%;"
+              >
+                <span>{{ historyItem.name }}</span>
+                <el-button
+                  size="small"
+                  text
+                  type="primary"
+                  @click.stop="editConnection(historyItem)"
+                >
+                  编辑
+                </el-button>
+              </div>
+            </el-option>
+          </el-select>
+          <el-button
+            type="primary"
+            :icon="Plus"
+            plain
+            @click="showAddConnectionDialog"
+          >
+            新增连接
+          </el-button>
+        </div>
+      </el-form-item>
+    </el-form>
 
-        <template #footer>
-            <el-button @click="visible = false">
-                取消
-            </el-button>
-            <el-button type="primary" :loading="connecting" @click="handleConnect" :disabled="!form.url">
-                连接
-            </el-button>
-        </template>
-    </el-dialog>
+    <template #footer>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
+      <el-button
+        type="primary"
+        :loading="connecting"
+        :disabled="!form.url"
+        @click="handleConnect"
+      >
+        连接
+      </el-button>
+    </template>
+  </el-dialog>
 
-    <!-- 新连接输入对话框 -->
-    <el-dialog v-model="newConnectionDialogVisible" title="添加新连接" width="400px" :close-on-click-modal="false">
-        <el-form label-width="80px">
-            <el-form-item label="连接地址">
-                <el-input v-model="newConnectionForm.url" placeholder="ws://192.168.1.100:9090 或 wss://..."
-                    @keyup.enter="saveNewConnection" />
-            </el-form-item>
-            <el-form-item label="连接名称">
-                <el-input v-model="newConnectionForm.name" placeholder="例如: 机器狗1号" @keyup.enter="saveNewConnection" />
-            </el-form-item>
-        </el-form>
-        <template #footer>
-            <el-button @click="cancelNewConnection">
-                取消
-            </el-button>
-            <el-button type="primary" @click="saveNewConnection"
-                :disabled="!newConnectionForm.url || !newConnectionForm.name.trim()">
-                保存
-            </el-button>
-        </template>
-    </el-dialog>
+  <!-- 新连接输入对话框 -->
+  <el-dialog
+    v-model="newConnectionDialogVisible"
+    title="添加新连接"
+    width="400px"
+    :close-on-click-modal="false"
+  >
+    <el-form label-width="80px">
+      <el-form-item label="连接地址">
+        <el-input
+          v-model="newConnectionForm.url"
+          placeholder="ws://192.168.1.100:9090 或 wss://..."
+          @keyup.enter="saveNewConnection"
+        />
+      </el-form-item>
+      <el-form-item label="连接名称">
+        <el-input
+          v-model="newConnectionForm.name"
+          placeholder="例如: 机器狗1号"
+          @keyup.enter="saveNewConnection"
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="cancelNewConnection">
+        取消
+      </el-button>
+      <el-button
+        type="primary"
+        :disabled="!newConnectionForm.url || !newConnectionForm.name.trim()"
+        @click="saveNewConnection"
+      >
+        保存
+      </el-button>
+    </template>
+  </el-dialog>
 
-    <!-- 编辑连接名称对话框 -->
-    <el-dialog v-model="editDialogVisible" title="编辑连接名称" width="400px">
-        <el-form label-width="80px">
-            <el-form-item label="名称">
-                <el-input v-model="editForm.name" placeholder="例如: 机器狗1号" @keyup.enter="saveEdit" />
-            </el-form-item>
-            <el-form-item label="地址">
-                <el-input v-model="editForm.url" disabled />
-            </el-form-item>
-        </el-form>
-        <template #footer>
-            <el-button @click="editDialogVisible = false">取消</el-button>
-            <el-button type="danger" @click="deleteConnection">删除</el-button>
-            <el-button type="primary" @click="saveEdit">保存</el-button>
-        </template>
-    </el-dialog>
+  <!-- 编辑连接名称对话框 -->
+  <el-dialog
+    v-model="editDialogVisible"
+    title="编辑连接名称"
+    width="400px"
+  >
+    <el-form label-width="80px">
+      <el-form-item label="名称">
+        <el-input
+          v-model="editForm.name"
+          placeholder="例如: 机器狗1号"
+          @keyup.enter="saveEdit"
+        />
+      </el-form-item>
+      <el-form-item label="地址">
+        <el-input
+          v-model="editForm.url"
+          disabled
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="editDialogVisible = false">
+        取消
+      </el-button>
+      <el-button
+        type="danger"
+        @click="deleteConnection"
+      >
+        删除
+      </el-button>
+      <el-button
+        type="primary"
+        @click="saveEdit"
+      >
+        保存
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">

@@ -1,41 +1,55 @@
 <template>
-    <div class="state-info">
-        <div class="info-header">
-            <h3>状态信息</h3>
-            <el-button size="small" @click="clearInfo">清除</el-button>
-        </div>
-        <div class="info-content">
-            <el-scrollbar height="100%">
-                <div class="info-section">
-                    <div class="info-item">
-                        <span class="label">连接状态:</span>
-                        <span class="value" :class="connectionClass">{{ connectionStatus }}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="label">服务器:</span>
-                        <span class="value">{{ serverUrl }}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="label">话题数量:</span>
-                        <span class="value">{{ topicCount }}</span>
-                    </div>
-                </div>
-
-                <div v-if="selectedTopic" class="info-section">
-                    <h4>当前话题</h4>
-                    <div class="info-item">
-                        <span class="label">名称:</span>
-                        <span class="value">{{ selectedTopic }}</span>
-                    </div>
-                </div>
-
-                <div v-if="latestMessage" class="info-section">
-                    <h4>最新消息</h4>
-                    <pre class="message-data">{{ formattedMessage }}</pre>
-                </div>
-            </el-scrollbar>
-        </div>
+  <div class="state-info">
+    <div class="info-header">
+      <h3>状态信息</h3>
+      <el-button
+        size="small"
+        @click="clearInfo"
+      >
+        清除
+      </el-button>
     </div>
+    <div class="info-content">
+      <el-scrollbar height="100%">
+        <div class="info-section">
+          <div class="info-item">
+            <span class="label">连接状态:</span>
+            <span
+              class="value"
+              :class="connectionClass"
+            >{{ connectionStatus }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">服务器:</span>
+            <span class="value">{{ serverUrl }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">话题数量:</span>
+            <span class="value">{{ topicCount }}</span>
+          </div>
+        </div>
+
+        <div
+          v-if="selectedTopic"
+          class="info-section"
+        >
+          <h4>当前话题</h4>
+          <div class="info-item">
+            <span class="label">名称:</span>
+            <span class="value">{{ selectedTopic }}</span>
+          </div>
+        </div>
+
+        <div
+          v-if="latestMessage"
+          class="info-section"
+        >
+          <h4>最新消息</h4>
+          <pre class="message-data">{{ formattedMessage }}</pre>
+        </div>
+      </el-scrollbar>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">

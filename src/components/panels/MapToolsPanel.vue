@@ -1,554 +1,997 @@
 <template>
-    <div class="map-tools-panel">
-        <div class="tools-content">
-            <!-- 建图按钮组 -->
-            <div class="button-group">
-                <el-button type="primary" :icon="Location" @click="handleMapping" :disabled="!isConnected"
-                    class="tool-button">
-                    开始建图
-                </el-button>
-            </div>
-            <div class="button-group">
-                <el-button type="primary" :icon="FolderOpened" @click="showMapSelector = true" class="tool-button">
-                    地图选择
-                </el-button>
-            </div>
-            <div class="button-group">
-                <el-button type="primary" :icon="Edit" @click="handleMapEdit" class="tool-button">
-                    地图编辑
-                </el-button>
-            </div>
-            <div class="button-group">
-                <el-button type="primary" :icon="Upload" @click="handleUploadMap" class="tool-button">
-                    上传地图
-                </el-button>
-            </div>
+  <div class="map-tools-panel">
+    <div class="tools-content">
+      <!-- 建图按钮组 -->
+      <div class="button-group">
+        <el-button
+          type="primary"
+          :icon="Location"
+          :disabled="!isConnected"
+          class="tool-button"
+          @click="handleMapping"
+        >
+          开始建图
+        </el-button>
+      </div>
+      <div class="button-group">
+        <el-button
+          type="primary"
+          :icon="FolderOpened"
+          class="tool-button"
+          @click="showMapSelector = true"
+        >
+          地图选择
+        </el-button>
+      </div>
+      <div class="button-group">
+        <el-button
+          type="primary"
+          :icon="Edit"
+          class="tool-button"
+          @click="handleMapEdit"
+        >
+          地图编辑
+        </el-button>
+      </div>
+      <div class="button-group">
+        <el-button
+          type="primary"
+          :icon="Upload"
+          class="tool-button"
+          @click="handleUploadMap"
+        >
+          上传地图
+        </el-button>
+      </div>
 
-            <!-- 当前地图显示 -->
-            <div v-if="currentMap" class="current-map-info">
+      <!-- 当前地图显示 -->
+      <div
+        v-if="currentMap"
+        class="current-map-info"
+      >
+        <div class="map-name">
+          <span class="label">当前地图:</span>
+          <span class="value">{{ currentMap.displayName }}</span>
+        </div>
+        <div class="map-details">
+          <span class="detail-item">路线数: {{ currentMap.queueCount }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 地图选择对话框 -->
+    <el-dialog
+      v-model="showMapSelector"
+      title="选择地图"
+      width="600px"
+    >
+      <template #header>
+        <div class="dialog-header">
+          <span>选择地图</span>
+          <el-button
+            :icon="Refresh"
+            circle
+            size="small"
+            :loading="refreshingMaps"
+            title="刷新地图列表"
+            class="refresh-btn"
+            @click="handleRefreshMaps"
+          />
+        </div>
+      </template>
+      <div class="map-selector-content">
+        <div class="map-list">
+          <div
+            v-for="map in availableMaps"
+            :key="map.folderName"
+            class="map-item"
+            :class="{ active: currentMap?.folderName === map.folderName }"
+            @click="selectMap(map)"
+          >
+            <div class="map-item-content">
+              <el-icon class="map-icon">
+                <FolderOpened />
+              </el-icon>
+              <div class="map-info">
                 <div class="map-name">
-                <span class="label">当前地图:</span>
-                    <span class="value">{{ currentMap.displayName }}</span>
+                  {{ map.displayName }}
                 </div>
-                <div class="map-details">
-                    <span class="detail-item">路线数: {{ currentMap.queueCount }}</span>
+                <div class="map-meta">
+                  <span
+                    v-if="map.createTime"
+                    class="meta-item"
+                  >创建时间: {{ map.createTime }}</span>
+                  <span class="meta-item">路线数: {{ map.queueCount }}</span>
                 </div>
+              </div>
             </div>
+            <el-icon
+              v-if="currentMap?.folderName === map.folderName"
+              class="check-icon"
+            >
+              <Check />
+            </el-icon>
+          </div>
+          <div
+            v-if="availableMaps.length === 0"
+            class="empty-maps"
+          >
+            <el-icon
+              :size="48"
+              color="#ccc"
+            >
+              <FolderOpened />
+            </el-icon>
+            <p>未找到地图文件夹</p>
+            <p class="empty-hint">
+              请确保 maps 文件夹下有地图文件夹，每个文件夹包含 map 和 queue 目录
+            </p>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showMapSelector = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!currentMap || isUploading"
+          @click="confirmMapSelection"
+        >
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 上传进度对话框 -->
+    <el-dialog
+      v-model="showUploadProgress"
+      title="发送地图文件"
+      width="500px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div class="upload-progress-content">
+        <div class="progress-info">
+          <div class="progress-text">
+            {{ uploadStatusText }}
+          </div>
+          <div
+            v-if="uploadCurrentFile"
+            class="progress-details"
+          >
+            当前文件: {{ uploadCurrentFile }}
+          </div>
+        </div>
+        <el-progress
+          :percentage="Math.round(uploadProgress)"
+          :status="uploadProgress === 100 ? 'success' : undefined"
+          :stroke-width="20"
+          :format="(percentage) => `${Math.round(percentage)}%`"
+          style="margin-top: 20px;"
+        />
+        <div
+          class="progress-stats"
+          style="margin-top: 20px;"
+        >
+          <div
+            v-if="uploadTotalSize > 0"
+            class="stat-item"
+          >
+            <span class="stat-label">总大小:</span>
+            <span class="stat-value">{{ formatFileSize(uploadTotalSize) }}</span>
+          </div>
+          <div
+            v-if="uploadSentSize > 0"
+            class="stat-item"
+          >
+            <span class="stat-label">已发送:</span>
+            <span class="stat-value">{{ formatFileSize(uploadSentSize) }}</span>
+          </div>
+          <div
+            v-if="uploadTotalFiles > 0"
+            class="stat-item"
+          >
+            <span class="stat-label">总文件数:</span>
+            <span class="stat-value">{{ uploadTotalFiles }}</span>
+          </div>
+          <div
+            v-if="uploadTotalFiles > 0"
+            class="stat-item"
+          >
+            <span class="stat-label">已完成:</span>
+            <span class="stat-value">{{ uploadCompletedFiles }}</span>
+          </div>
+          <div
+            v-if="uploadEta > 0 && uploadProgress < 100"
+            class="stat-item"
+          >
+            <span class="stat-label">预计剩余:</span>
+            <span class="stat-value">{{ formatTime(uploadEta) }}</span>
+          </div>
+          <div
+            v-if="uploadProgress === 100 && uploadWaiting"
+            class="stat-item"
+          >
+            <span class="stat-label">等待写入:</span>
+            <span class="stat-value">{{ uploadWaitCountdown }}s</span>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 上传地图对话框 -->
+    <el-dialog
+      v-model="showUploadMapDialog"
+      title="上传地图"
+      width="600px"
+      @close="handleCloseUploadDialog"
+    >
+      <div class="upload-map-content">
+        <el-alert
+          v-if="uploadMapError"
+          :title="uploadMapError"
+          type="error"
+          :closable="false"
+          style="margin-bottom: 20px;"
+        />
+        <div class="upload-section">
+          <el-button
+            type="primary"
+            :loading="uploadingMap"
+            @click="triggerFolderSelect"
+          >
+            <el-icon style="margin-right: 5px;">
+              <Upload />
+            </el-icon>
+            从本地上传地图文件夹
+          </el-button>
+          <el-button
+            type="success"
+            :loading="downloadingFromRobot"
+            :disabled="!isConnected"
+            @click="handleDownloadFromRobot"
+          >
+            <el-icon style="margin-right: 5px;">
+              <Upload />
+            </el-icon>
+            从机器狗上传
+          </el-button>
+          <input
+            ref="folderInputRef"
+            type="file"
+            webkitdirectory
+            directory
+            multiple
+            style="display: none;"
+            @change="handleFolderSelect"
+          >
+        </div>
+        <div
+          v-if="selectedFolderFiles.length > 0"
+          class="folder-info"
+        >
+          <el-divider>文件夹信息</el-divider>
+          <div class="info-item">
+            <span class="label">文件数量:</span>
+            <span class="value">{{ selectedFolderFiles.length }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">文件夹结构:</span>
+            <div class="structure-tree">
+              <div
+                v-for="(files, dir) in folderStructure"
+                :key="dir"
+                class="structure-item"
+              >
+                <el-icon>
+                  <FolderOpened />
+                </el-icon>
+                <span>{{ dir }}</span>
+                <span class="file-count">({{ files.length }} 个文件)</span>
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="folderValidation"
+            class="validation-result"
+          >
+            <el-icon
+              v-if="folderValidation.valid"
+              color="#67c23a"
+              style="margin-right: 5px;"
+            >
+              <Check />
+            </el-icon>
+            <el-icon
+              v-else
+              color="#f56c6c"
+              style="margin-right: 5px;"
+            >
+              <Delete />
+            </el-icon>
+            <span :style="{ color: folderValidation.valid ? '#67c23a' : '#f56c6c' }">
+              {{ folderValidation.message }}
+            </span>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showUploadMapDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!folderValidation?.valid || uploadingMap"
+          @click="showMapNameDialog = true"
+        >
+          下一步：设置地图名称
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 地图名称输入对话框 -->
+    <el-dialog
+      v-model="showMapNameDialog"
+      title="设置地图信息"
+      width="400px"
+      @close="handleCloseMapNameDialog"
+    >
+      <div class="map-name-input">
+        <el-form
+          :model="newMapNameForm"
+          label-width="100px"
+        >
+          <el-form-item
+            label="地图名称"
+            required
+          >
+            <el-input
+              v-model="newMapNameForm.name"
+              placeholder="请输入地图名称"
+              maxlength="50"
+              show-word-limit
+            />
+          </el-form-item>
+          <el-form-item label="描述（可选）">
+            <el-input
+              v-model="newMapNameForm.description"
+              type="textarea"
+              :rows="3"
+              placeholder="请输入地图描述"
+              maxlength="200"
+              show-word-limit
+            />
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button @click="showMapNameDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="uploadingMap"
+          :disabled="!newMapNameForm.name.trim()"
+          @click="confirmUploadMap"
+        >
+          确认上传
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 上传地图进度对话框 -->
+    <el-dialog
+      v-model="showUploadMapProgress"
+      :title="isFromRobot ? '从机器狗上传地图' : '上传地图'"
+      width="500px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div class="upload-map-progress-content">
+        <div class="progress-text">
+          {{ uploadMapStatusText }}
+        </div>
+        <el-progress
+          :percentage="Math.round(uploadMapProgress)"
+          :status="uploadMapProgress === 100 ? 'success' : undefined"
+          :stroke-width="20"
+          style="margin-top: 20px;"
+        />
+        <div
+          class="progress-stats"
+          style="margin-top: 20px;"
+        >
+          <div
+            v-if="uploadMapTotalSize > 0"
+            class="stat-item"
+          >
+            <span class="stat-label">总大小:</span>
+            <span class="stat-value">{{ formatFileSize(uploadMapTotalSize) }}</span>
+          </div>
+          <div
+            v-if="uploadMapDownloadedSize > 0"
+            class="stat-item"
+          >
+            <span class="stat-label">{{ isFromRobot ? '已上传' : '已上传' }}:</span>
+            <span class="stat-value">{{ formatFileSize(uploadMapDownloadedSize) }}</span>
+          </div>
+          <div
+            v-if="uploadMapEta > 0 && uploadMapProgress < 100"
+            class="stat-item"
+          >
+            <span class="stat-label">预计剩余:</span>
+            <span class="stat-value">{{ formatTime(uploadMapEta) }}</span>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 地图编辑选择对话框 -->
+    <el-dialog
+      v-model="showMapEditSelector"
+      title="选择要编辑的地图"
+      width="600px"
+    >
+      <template #header>
+        <div class="dialog-header">
+          <span>选择要编辑的地图</span>
+          <el-button
+            :icon="Refresh"
+            circle
+            size="small"
+            :loading="refreshingMaps"
+            title="刷新地图列表"
+            class="refresh-btn"
+            @click="handleRefreshMaps"
+          />
+        </div>
+      </template>
+      <div class="map-selector-content">
+        <div class="map-list">
+          <div
+            v-for="map in availableMaps"
+            :key="map.folderName"
+            class="map-item"
+            :class="{ active: selectedMapForEdit?.folderName === map.folderName }"
+            @click="selectMapForEdit(map)"
+          >
+            <div class="map-item-content">
+              <el-icon class="map-icon">
+                <FolderOpened />
+              </el-icon>
+              <div class="map-info">
+                <div class="map-name">
+                  {{ map.displayName }}
+                </div>
+                <div class="map-meta">
+                  <span
+                    v-if="map.createTime"
+                    class="meta-item"
+                  >创建时间: {{ map.createTime }}</span>
+                  <span class="meta-item">路线数: {{ map.queueCount }}</span>
+                </div>
+              </div>
+            </div>
+            <div
+              class="map-item-actions"
+              @click.stop
+            >
+              <el-icon
+                v-if="selectedMapForEdit?.folderName === map.folderName"
+                class="check-icon"
+              >
+                <Check />
+              </el-icon>
+              <el-button
+                type="danger"
+                :icon="Delete"
+                circle
+                size="small"
+                title="删除地图"
+                @click="handleDeleteMap(map)"
+              />
+            </div>
+          </div>
+          <div
+            v-if="availableMaps.length === 0"
+            class="empty-maps"
+          >
+            <el-icon
+              :size="48"
+              color="#ccc"
+            >
+              <FolderOpened />
+            </el-icon>
+            <p>未找到地图文件夹</p>
+            <p class="empty-hint">
+              请确保 maps 文件夹下有地图文件夹，每个文件夹包含 map 和 queue 目录
+            </p>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showMapEditSelector = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!selectedMapForEdit"
+          @click="confirmMapEditSelection"
+        >
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 地图编辑对话框 -->
+    <el-dialog
+      v-model="showMapEditor"
+      title="地图编辑"
+      width="95%"
+      :close-on-click-modal="false"
+      class="map-editor-dialog"
+      top="2vh"
+    >
+      <div class="map-editor-content">
+        <div class="editor-toolbar">
+          <div class="toolbar-left">
+            <span
+              v-if="selectedMapForEdit"
+              class="current-map-name"
+            >
+              当前地图: {{ selectedMapForEdit.displayName }}
+            </span>
+          </div>
+          <div class="toolbar-right">
+            <el-button-group>
+              <el-button
+                :type="currentTool === 'brush' ? 'primary' : 'default'"
+                title="画笔工具"
+                @click="setTool('brush')"
+              >
+                <el-icon>
+                  <Edit />
+                </el-icon>
+                画笔
+              </el-button>
+              <el-button
+                :type="currentTool === 'rectangle' ? 'primary' : 'default'"
+                title="框选工具"
+                @click="setTool('rectangle')"
+              >
+                <el-icon>
+                  <Document />
+                </el-icon>
+                框选
+              </el-button>
+              <el-button
+                :type="currentTool === 'eraser' ? 'primary' : 'default'"
+                title="橡皮擦工具"
+                @click="setTool('eraser')"
+              >
+                <el-icon>
+                  <Delete />
+                </el-icon>
+                橡皮擦
+              </el-button>
+              <el-button
+                :type="currentTool === 'label' ? 'primary' : 'default'"
+                title="添加标签"
+                @click="setTool('label')"
+              >
+                <el-icon>
+                  <Location />
+                </el-icon>
+                标签
+              </el-button>
+              <el-button
+                title="管理标签"
+                :disabled="labels.length === 0"
+                @click="showLabelManager = true"
+              >
+                <el-icon>
+                  <List />
+                </el-icon>
+                管理标签
+              </el-button>
+            </el-button-group>
+            <el-input-number
+              v-model="brushSize"
+              :min="1"
+              :max="50"
+              :step="1"
+              style="width: 100px; margin-left: 10px;"
+              title="画笔大小"
+            />
+            <el-button-group style="margin-left: 10px;">
+              <el-button
+                title="缩小"
+                :disabled="!mapLoaded"
+                @click="zoomOut"
+              >
+                <el-icon>
+                  <ZoomOut />
+                </el-icon>
+              </el-button>
+              <el-button
+                title="重置缩放"
+                :disabled="!mapLoaded"
+                @click="resetZoom"
+              >
+                {{ Math.round(zoomLevel * 100) }}%
+              </el-button>
+              <el-button
+                title="放大"
+                :disabled="!mapLoaded"
+                @click="zoomIn"
+              >
+                <el-icon>
+                  <ZoomIn />
+                </el-icon>
+              </el-button>
+            </el-button-group>
+          </div>
         </div>
 
-        <!-- 地图选择对话框 -->
-        <el-dialog v-model="showMapSelector" title="选择地图" width="600px">
-            <template #header>
-                <div class="dialog-header">
-                    <span>选择地图</span>
-                    <el-button :icon="Refresh" circle size="small" @click="handleRefreshMaps" :loading="refreshingMaps"
-                        title="刷新地图列表" class="refresh-btn" />
-                </div>
+        <div
+          class="map-canvas-container"
+          @mousemove="handleMouseMove"
+          @mouseup="handleMouseUp"
+          @mouseleave="handleMouseUp"
+        >
+          <div
+            v-if="mapLoaded || editing"
+            class="canvas-wrapper"
+            :style="{ transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }"
+          >
+            <canvas
+              ref="mapCanvasRef"
+              @mousedown="handleMouseDownWithSave"
+              @contextmenu.prevent="handleContextMenu"
+              @mousedown.right="handleRightMouseDown"
+            />
+          </div>
+          <div
+            v-else
+            class="empty-editor"
+          >
+            <p>请选择地图文件</p>
+          </div>
+        </div>
+
+        <div class="editor-actions">
+          <el-button
+            :disabled="!mapLoaded || editing"
+            @click="clearMap"
+          >
+            清空地图
+          </el-button>
+          <el-button
+            :disabled="!mapLoaded || editing"
+            @click="invertMap"
+          >
+            反转颜色
+          </el-button>
+          <el-button
+            :disabled="!mapLoaded || editing"
+            @click="undoLastAction"
+          >
+            撤销
+          </el-button>
+          <el-button
+            type="primary"
+            :disabled="!mapLoaded || saving"
+            @click="showSaveDialog = true"
+          >
+            {{ saving ? '保存中...' : '保存地图' }}
+          </el-button>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 标签管理对话框 -->
+    <el-dialog
+      v-model="showLabelManager"
+      title="标签管理"
+      width="500px"
+      append-to-body
+    >
+      <div
+        v-if="labels.length === 0"
+        class="empty-labels"
+      >
+        <p>暂无标签</p>
+      </div>
+      <el-table
+        v-else
+        :data="labels"
+        style="width: 100%"
+        max-height="400"
+      >
+        <el-table-column
+          prop="name"
+          label="名称"
+        />
+        <el-table-column
+          label="坐标"
+          width="180"
+        >
+          <template #default="scope">
+            X: {{ scope.row.x }}, Y: {{ scope.row.y }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="操作"
+          width="80"
+          align="center"
+        >
+          <template #default="scope">
+            <el-button
+              type="danger"
+              :icon="Delete"
+              circle
+              size="small"
+              title="删除标签"
+              @click="removeLabel(scope.$index)"
+            />
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="showLabelManager = false">
+          关闭
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 保存地图对话框 -->
+    <el-dialog
+      v-model="showSaveDialog"
+      title="保存地图"
+      width="500px"
+      :close-on-click-modal="false"
+      @open="handleSaveDialogOpen"
+    >
+      <div class="save-dialog-content">
+        <el-radio-group
+          v-model="saveMode"
+          @change="handleSaveModeChange"
+        >
+          <el-radio label="overwrite">
+            覆盖原图
+          </el-radio>
+          <el-radio label="new">
+            保存为新文件
+          </el-radio>
+        </el-radio-group>
+
+        <div
+          v-if="saveMode === 'new'"
+          style="margin-top: 16px;"
+        >
+          <el-form
+            :model="saveMapNameForm"
+            label-width="100px"
+          >
+            <el-form-item
+              label="地图名称"
+              required
+            >
+              <el-input
+                v-model="saveMapNameForm.name"
+                placeholder="请输入地图名称"
+                maxlength="50"
+                show-word-limit
+              />
+            </el-form-item>
+            <el-form-item label="描述（可选）">
+              <el-input
+                v-model="saveMapNameForm.description"
+                type="textarea"
+                :rows="3"
+                placeholder="请输入地图描述"
+                maxlength="200"
+                show-word-limit
+              />
+            </el-form-item>
+          </el-form>
+          <p style="font-size: 12px; color: #999; margin-top: 8px;">
+            将创建新地图文件夹，并复制原地图的其他文件（yaml、pcd等）
+          </p>
+        </div>
+
+        <div
+          v-else
+          style="margin-top: 16px;"
+        >
+          <el-alert
+            :title="`将覆盖原文件: ${selectedMapForEdit?.mapPath || '未知'}`"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showSaveDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="saving || (saveMode === 'new' && !saveMapNameForm.name.trim())"
+          @click="confirmSaveMap"
+        >
+          {{ saving ? '保存中...' : '确定保存' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 建图对话框 -->
+    <el-dialog
+      v-model="showMappingConfirmDialog"
+      :title="isMapping ? '建图中' : '开始建图'"
+      width="500px"
+      :close-on-click-modal="false"
+      @close="handleMappingDialogClose"
+    >
+      <div class="mapping-confirm-content">
+        <!-- 确认阶段：显示注意事项 -->
+        <div v-if="!isMapping">
+          <el-alert
+            type="warning"
+            :closable="false"
+            show-icon
+          >
+            <template #title>
+              <div style="font-weight: bold; margin-bottom: 12px;">
+                建图前请确认以下事项：
+              </div>
             </template>
-            <div class="map-selector-content">
-                <div class="map-list">
-                    <div v-for="map in availableMaps" :key="map.folderName" class="map-item"
-                        :class="{ active: currentMap?.folderName === map.folderName }" @click="selectMap(map)">
-                        <div class="map-item-content">
-                            <el-icon class="map-icon">
-                                <FolderOpened />
-                        </el-icon>
-                            <div class="map-info">
-                                <div class="map-name">{{ map.displayName }}</div>
-                                <div class="map-meta">
-                                    <span class="meta-item" v-if="map.createTime">创建时间: {{ map.createTime }}</span>
-                                    <span class="meta-item">路线数: {{ map.queueCount }}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <el-icon v-if="currentMap?.folderName === map.folderName" class="check-icon">
-                            <Check />
-                        </el-icon>
-                    </div>
-                    <div v-if="availableMaps.length === 0" class="empty-maps">
-                        <el-icon :size="48" color="#ccc">
-                            <FolderOpened />
-                        </el-icon>
-                        <p>未找到地图文件夹</p>
-                        <p class="empty-hint">请确保 maps 文件夹下有地图文件夹，每个文件夹包含 map 和 queue 目录</p>
-                    </div>
-                </div>
+          </el-alert>
+          <div class="mapping-notices">
+            <div class="notice-item">
+              <el-icon class="notice-icon">
+                <Warning />
+              </el-icon>
+              <span><strong>确保现有地图已上传：</strong>建图会覆盖现有地图，确认无误后再开始建图</span>
             </div>
-            <template #footer>
-                <el-button @click="showMapSelector = false">取消</el-button>
-                <el-button type="primary" @click="confirmMapSelection"
-                    :disabled="!currentMap || isUploading">确定</el-button>
+            <div class="notice-item">
+              <el-icon class="notice-icon">
+                <Warning />
+              </el-icon>
+              <span><strong>确保导航已停止：</strong>建图前必须停止所有导航任务，避免冲突</span>
+            </div>
+            <div class="notice-item">
+              <el-icon class="notice-icon">
+                <Warning />
+              </el-icon>
+              <span><strong>建图范围不宜过大：</strong>建议在较小区域内进行建图，避免数据量过大导致处理缓慢</span>
+            </div>
+            <div class="notice-item">
+              <el-icon class="notice-icon">
+                <Warning />
+              </el-icon>
+              <span><strong>确保机器狗稳定：</strong>建图过程中请保持机器狗稳定，避免剧烈运动</span>
+            </div>
+            <div class="notice-item">
+              <el-icon class="notice-icon">
+                <InfoFilled />
+              </el-icon>
+              <span><strong>建图完成后：</strong>点击"停止建图"按钮将自动保存所有文件</span>
+            </div>
+          </div>
+        </div>
+        <!-- 启动中阶段：显示启动状态 -->
+        <div
+          v-else-if="mappingStarting"
+          class="mapping-starting"
+        >
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+          >
+            <template #title>
+              <div style="font-weight: bold; margin-bottom: 12px;">
+                正在启动建图...
+              </div>
             </template>
-        </el-dialog>
-
-        <!-- 上传进度对话框 -->
-        <el-dialog v-model="showUploadProgress" title="发送地图文件" width="500px" :close-on-click-modal="false"
-            :close-on-press-escape="false">
-            <div class="upload-progress-content">
-                <div class="progress-info">
-                    <div class="progress-text">{{ uploadStatusText }}</div>
-                    <div class="progress-details" v-if="uploadCurrentFile">
-                        当前文件: {{ uploadCurrentFile }}
-                    </div>
+          </el-alert>
+          <div class="mapping-status-content">
+            <div class="status-info">
+              <el-icon class="status-icon">
+                <Location />
+              </el-icon>
+              <div class="status-text">
+                <div class="status-title">
+                  等待建图启动
                 </div>
-                <el-progress :percentage="Math.round(uploadProgress)"
-                    :status="uploadProgress === 100 ? 'success' : undefined" :stroke-width="20"
-                    :format="(percentage) => `${Math.round(percentage)}%`" style="margin-top: 20px;" />
-                <div class="progress-stats" style="margin-top: 20px;">
-                    <div class="stat-item" v-if="uploadTotalSize > 0">
-                        <span class="stat-label">总大小:</span>
-                        <span class="stat-value">{{ formatFileSize(uploadTotalSize) }}</span>
-                    </div>
-                    <div class="stat-item" v-if="uploadSentSize > 0">
-                        <span class="stat-label">已发送:</span>
-                        <span class="stat-value">{{ formatFileSize(uploadSentSize) }}</span>
-                    </div>
-                    <div class="stat-item" v-if="uploadTotalFiles > 0">
-                        <span class="stat-label">总文件数:</span>
-                        <span class="stat-value">{{ uploadTotalFiles }}</span>
-                    </div>
-                    <div class="stat-item" v-if="uploadTotalFiles > 0">
-                        <span class="stat-label">已完成:</span>
-                        <span class="stat-value">{{ uploadCompletedFiles }}</span>
-                    </div>
-                    <div class="stat-item" v-if="uploadEta > 0 && uploadProgress < 100">
-                        <span class="stat-label">预计剩余:</span>
-                        <span class="stat-value">{{ formatTime(uploadEta) }}</span>
-                    </div>
-                    <div class="stat-item" v-if="uploadProgress === 100 && uploadWaiting">
-                        <span class="stat-label">等待写入:</span>
-                        <span class="stat-value">{{ uploadWaitCountdown }}s</span>
-                    </div>
+                <div class="status-desc">
+                  正在启动建图进程，请稍候...
                 </div>
+              </div>
             </div>
-        </el-dialog>
-
-        <!-- 上传地图对话框 -->
-        <el-dialog v-model="showUploadMapDialog" title="上传地图" width="600px" @close="handleCloseUploadDialog">
-            <div class="upload-map-content">
-                <el-alert v-if="uploadMapError" :title="uploadMapError" type="error" :closable="false"
-                    style="margin-bottom: 20px;" />
-                <div class="upload-section">
-                    <el-button type="primary" @click="triggerFolderSelect" :loading="uploadingMap">
-                        <el-icon style="margin-right: 5px;">
-                            <Upload />
-                        </el-icon>
-                        从本地上传地图文件夹
-                    </el-button>
-                    <el-button type="success" @click="handleDownloadFromRobot" :loading="downloadingFromRobot"
-                        :disabled="!isConnected">
-                        <el-icon style="margin-right: 5px;">
-                            <Upload />
-                        </el-icon>
-                        从机器狗上传
-                    </el-button>
-                    <input ref="folderInputRef" type="file" webkitdirectory directory multiple style="display: none;"
-                        @change="handleFolderSelect" />
-                </div>
-                <div v-if="selectedFolderFiles.length > 0" class="folder-info">
-                    <el-divider>文件夹信息</el-divider>
-                    <div class="info-item">
-                        <span class="label">文件数量:</span>
-                        <span class="value">{{ selectedFolderFiles.length }}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="label">文件夹结构:</span>
-                        <div class="structure-tree">
-                            <div v-for="(files, dir) in folderStructure" :key="dir" class="structure-item">
-                                <el-icon>
-                                    <FolderOpened />
-                                </el-icon>
-                                <span>{{ dir }}</span>
-                                <span class="file-count">({{ files.length }} 个文件)</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div v-if="folderValidation" class="validation-result">
-                        <el-icon v-if="folderValidation.valid" color="#67c23a" style="margin-right: 5px;">
-                            <Check />
-                        </el-icon>
-                        <el-icon v-else color="#f56c6c" style="margin-right: 5px;">
-                            <Delete />
-                        </el-icon>
-                        <span :style="{ color: folderValidation.valid ? '#67c23a' : '#f56c6c' }">
-                            {{ folderValidation.message }}
-                        </span>
-                    </div>
-                </div>
-            </div>
-            <template #footer>
-                <el-button @click="showUploadMapDialog = false">取消</el-button>
-                <el-button type="primary" @click="showMapNameDialog = true"
-                    :disabled="!folderValidation?.valid || uploadingMap">
-                    下一步：设置地图名称
-                </el-button>
+          </div>
+        </div>
+        <!-- 建图中阶段：显示状态和停止按钮 -->
+        <div
+          v-else
+          class="mapping-status"
+        >
+          <el-alert
+            type="success"
+            :closable="false"
+            show-icon
+          >
+            <template #title>
+              <div style="font-weight: bold; margin-bottom: 12px;">
+                建图正在运行中...
+              </div>
             </template>
-        </el-dialog>
-
-        <!-- 地图名称输入对话框 -->
-        <el-dialog v-model="showMapNameDialog" title="设置地图信息" width="400px" @close="handleCloseMapNameDialog">
-            <div class="map-name-input">
-                <el-form :model="newMapNameForm" label-width="100px">
-                    <el-form-item label="地图名称" required>
-                        <el-input v-model="newMapNameForm.name" placeholder="请输入地图名称" maxlength="50" show-word-limit />
-                    </el-form-item>
-                    <el-form-item label="描述（可选）">
-                        <el-input v-model="newMapNameForm.description" type="textarea" :rows="3" placeholder="请输入地图描述"
-                            maxlength="200" show-word-limit />
-                    </el-form-item>
-                </el-form>
+          </el-alert>
+          <div class="mapping-status-content">
+            <div class="status-info">
+              <el-icon class="status-icon">
+                <Location />
+              </el-icon>
+              <div class="status-text">
+                <div class="status-title">
+                  建图进行中
+                </div>
+                <div class="status-desc">
+                  正在构建地图
+                </div>
+              </div>
             </div>
-            <template #footer>
-                <el-button @click="showMapNameDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmUploadMap" :loading="uploadingMap"
-                    :disabled="!newMapNameForm.name.trim()">
-                    确认上传
-                </el-button>
-            </template>
-        </el-dialog>
-
-        <!-- 上传地图进度对话框 -->
-        <el-dialog v-model="showUploadMapProgress" :title="isFromRobot ? '从机器狗上传地图' : '上传地图'" width="500px" :close-on-click-modal="false"
-            :close-on-press-escape="false">
-            <div class="upload-map-progress-content">
-                <div class="progress-text">{{ uploadMapStatusText }}</div>
-                <el-progress :percentage="Math.round(uploadMapProgress)"
-                    :status="uploadMapProgress === 100 ? 'success' : undefined" :stroke-width="20"
-                    style="margin-top: 20px;" />
-                <div class="progress-stats" style="margin-top: 20px;">
-                    <div class="stat-item" v-if="uploadMapTotalSize > 0">
-                        <span class="stat-label">总大小:</span>
-                        <span class="stat-value">{{ formatFileSize(uploadMapTotalSize) }}</span>
-                    </div>
-                    <div class="stat-item" v-if="uploadMapDownloadedSize > 0">
-                        <span class="stat-label">{{ isFromRobot ? '已上传' : '已上传' }}:</span>
-                        <span class="stat-value">{{ formatFileSize(uploadMapDownloadedSize) }}</span>
-                    </div>
-                    <div class="stat-item" v-if="uploadMapEta > 0 && uploadMapProgress < 100">
-                        <span class="stat-label">预计剩余:</span>
-                        <span class="stat-value">{{ formatTime(uploadMapEta) }}</span>
-                    </div>
-                </div>
+            <div class="status-tips">
+              <div class="tip-item">
+                <el-icon>
+                  <InfoFilled />
+                </el-icon>
+                <span>建图过程中请保持机器狗稳定移动</span>
+              </div>
+              <div class="tip-item">
+                <el-icon>
+                  <InfoFilled />
+                </el-icon>
+                <span>停止建图后将自动保存所有文件</span>
+              </div>
             </div>
-        </el-dialog>
-
-        <!-- 地图编辑选择对话框 -->
-        <el-dialog v-model="showMapEditSelector" title="选择要编辑的地图" width="600px">
-            <template #header>
-                <div class="dialog-header">
-                    <span>选择要编辑的地图</span>
-                    <el-button :icon="Refresh" circle size="small" @click="handleRefreshMaps" :loading="refreshingMaps"
-                        title="刷新地图列表" class="refresh-btn" />
-                </div>
-            </template>
-            <div class="map-selector-content">
-                <div class="map-list">
-                    <div v-for="map in availableMaps" :key="map.folderName" class="map-item"
-                        :class="{ active: selectedMapForEdit?.folderName === map.folderName }"
-                        @click="selectMapForEdit(map)">
-                        <div class="map-item-content">
-                            <el-icon class="map-icon">
-                                <FolderOpened />
-                            </el-icon>
-                            <div class="map-info">
-                                <div class="map-name">{{ map.displayName }}</div>
-                                <div class="map-meta">
-                                    <span class="meta-item" v-if="map.createTime">创建时间: {{ map.createTime }}</span>
-                                    <span class="meta-item">路线数: {{ map.queueCount }}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="map-item-actions" @click.stop>
-                            <el-icon v-if="selectedMapForEdit?.folderName === map.folderName" class="check-icon">
-                                <Check />
-                            </el-icon>
-                            <el-button type="danger" :icon="Delete" circle size="small" @click="handleDeleteMap(map)"
-                                title="删除地图" />
-                        </div>
-                    </div>
-                    <div v-if="availableMaps.length === 0" class="empty-maps">
-                        <el-icon :size="48" color="#ccc">
-                            <FolderOpened />
-                        </el-icon>
-                        <p>未找到地图文件夹</p>
-                        <p class="empty-hint">请确保 maps 文件夹下有地图文件夹，每个文件夹包含 map 和 queue 目录</p>
-                    </div>
-                </div>
-            </div>
-            <template #footer>
-                <el-button @click="showMapEditSelector = false">取消</el-button>
-                <el-button type="primary" @click="confirmMapEditSelection"
-                    :disabled="!selectedMapForEdit">确定</el-button>
-            </template>
-        </el-dialog>
-
-        <!-- 地图编辑对话框 -->
-        <el-dialog v-model="showMapEditor" title="地图编辑" width="95%" :close-on-click-modal="false"
-            class="map-editor-dialog" top="2vh">
-            <div class="map-editor-content">
-                <div class="editor-toolbar">
-                    <div class="toolbar-left">
-                        <span v-if="selectedMapForEdit" class="current-map-name">
-                            当前地图: {{ selectedMapForEdit.displayName }}
-                        </span>
-                    </div>
-                    <div class="toolbar-right">
-                        <el-button-group>
-                            <el-button :type="currentTool === 'brush' ? 'primary' : 'default'" @click="setTool('brush')"
-                                title="画笔工具">
-                                <el-icon>
-                                    <Edit />
-                                </el-icon>
-                                画笔
-                            </el-button>
-                            <el-button :type="currentTool === 'rectangle' ? 'primary' : 'default'"
-                                @click="setTool('rectangle')" title="框选工具">
-                                <el-icon>
-                                    <Document />
-                                </el-icon>
-                                框选
-                            </el-button>
-                            <el-button :type="currentTool === 'eraser' ? 'primary' : 'default'"
-                                @click="setTool('eraser')" title="橡皮擦工具">
-                                <el-icon>
-                                    <Delete />
-                                </el-icon>
-                                橡皮擦
-                            </el-button>
-                            <el-button :type="currentTool === 'label' ? 'primary' : 'default'"
-                                @click="setTool('label')" title="添加标签">
-                                <el-icon>
-                                    <Location />
-                                </el-icon>
-                                标签
-                            </el-button>
-                            <el-button @click="showLabelManager = true" title="管理标签" :disabled="labels.length === 0">
-                                <el-icon>
-                                    <List />
-                                </el-icon>
-                                管理标签
-                            </el-button>
-                        </el-button-group>
-                        <el-input-number v-model="brushSize" :min="1" :max="50" :step="1"
-                            style="width: 100px; margin-left: 10px;" title="画笔大小" />
-                        <el-button-group style="margin-left: 10px;">
-                            <el-button @click="zoomOut" title="缩小" :disabled="!mapLoaded">
-                                <el-icon>
-                                    <ZoomOut />
-                                </el-icon>
-                            </el-button>
-                            <el-button @click="resetZoom" title="重置缩放" :disabled="!mapLoaded">
-                                {{ Math.round(zoomLevel * 100) }}%
-                            </el-button>
-                            <el-button @click="zoomIn" title="放大" :disabled="!mapLoaded">
-                                <el-icon>
-                                    <ZoomIn />
-                                </el-icon>
-                            </el-button>
-                        </el-button-group>
-                    </div>
-                </div>
-
-                <div class="map-canvas-container" @mousemove="handleMouseMove"
-                    @mouseup="handleMouseUp" @mouseleave="handleMouseUp">
-                    <div v-if="mapLoaded || editing" class="canvas-wrapper"
-                        :style="{ transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }">
-                        <canvas ref="mapCanvasRef" @mousedown="handleMouseDownWithSave"
-                            @contextmenu.prevent="handleContextMenu" @mousedown.right="handleRightMouseDown"></canvas>
-                    </div>
-                    <div v-else class="empty-editor">
-                        <p>请选择地图文件</p>
-                    </div>
-                </div>
-
-                <div class="editor-actions">
-                    <el-button @click="clearMap" :disabled="!mapLoaded || editing">清空地图</el-button>
-                    <el-button @click="invertMap" :disabled="!mapLoaded || editing">反转颜色</el-button>
-                    <el-button @click="undoLastAction" :disabled="!mapLoaded || editing">撤销</el-button>
-                    <el-button type="primary" @click="showSaveDialog = true" :disabled="!mapLoaded || saving">
-                        {{ saving ? '保存中...' : '保存地图' }}
-                    </el-button>
-                </div>
-            </div>
-        </el-dialog>
-
-        <!-- 标签管理对话框 -->
-        <el-dialog v-model="showLabelManager" title="标签管理" width="500px" append-to-body>
-            <div v-if="labels.length === 0" class="empty-labels">
-                <p>暂无标签</p>
-            </div>
-            <el-table v-else :data="labels" style="width: 100%" max-height="400">
-                <el-table-column prop="name" label="名称" />
-                <el-table-column label="坐标" width="180">
-                    <template #default="scope">
-                        X: {{ scope.row.x }}, Y: {{ scope.row.y }}
-                    </template>
-                </el-table-column>
-                <el-table-column label="操作" width="80" align="center">
-                    <template #default="scope">
-                        <el-button type="danger" :icon="Delete" circle size="small"
-                            @click="removeLabel(scope.$index)" title="删除标签" />
-                    </template>
-                </el-table-column>
-            </el-table>
-            <template #footer>
-                <el-button @click="showLabelManager = false">关闭</el-button>
-            </template>
-        </el-dialog>
-
-        <!-- 保存地图对话框 -->
-        <el-dialog v-model="showSaveDialog" title="保存地图" width="500px" :close-on-click-modal="false" @open="handleSaveDialogOpen">
-            <div class="save-dialog-content">
-                <el-radio-group v-model="saveMode" @change="handleSaveModeChange">
-                    <el-radio label="overwrite">覆盖原图</el-radio>
-                    <el-radio label="new">保存为新文件</el-radio>
-                </el-radio-group>
-
-                <div v-if="saveMode === 'new'" style="margin-top: 16px;">
-                    <el-form :model="saveMapNameForm" label-width="100px">
-                        <el-form-item label="地图名称" required>
-                            <el-input v-model="saveMapNameForm.name" placeholder="请输入地图名称" maxlength="50"
-                                show-word-limit />
-                        </el-form-item>
-                        <el-form-item label="描述（可选）">
-                            <el-input v-model="saveMapNameForm.description" type="textarea" :rows="3"
-                                placeholder="请输入地图描述" maxlength="200" show-word-limit />
-                        </el-form-item>
-                    </el-form>
-                    <p style="font-size: 12px; color: #999; margin-top: 8px;">
-                        将创建新地图文件夹，并复制原地图的其他文件（yaml、pcd等）
-                    </p>
-                </div>
-
-                <div v-else style="margin-top: 16px;">
-                    <el-alert :title="`将覆盖原文件: ${selectedMapForEdit?.mapPath || '未知'}`" type="warning" :closable="false"
-                        show-icon />
-                </div>
-            </div>
-            <template #footer>
-                <el-button @click="showSaveDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmSaveMap"
-                    :disabled="saving || (saveMode === 'new' && !saveMapNameForm.name.trim())">
-                    {{ saving ? '保存中...' : '确定保存' }}
-                </el-button>
-            </template>
-        </el-dialog>
-
-        <!-- 建图对话框 -->
-        <el-dialog v-model="showMappingConfirmDialog" :title="isMapping ? '建图中' : '开始建图'" width="500px"
-            :close-on-click-modal="false" @close="handleMappingDialogClose">
-            <div class="mapping-confirm-content">
-                <!-- 确认阶段：显示注意事项 -->
-                <div v-if="!isMapping">
-                    <el-alert type="warning" :closable="false" show-icon>
-                        <template #title>
-                            <div style="font-weight: bold; margin-bottom: 12px;">建图前请确认以下事项：</div>
-                        </template>
-                    </el-alert>
-                    <div class="mapping-notices">
-                        <div class="notice-item">
-                            <el-icon class="notice-icon">
-                                <Warning />
-                            </el-icon>
-                            <span><strong>确保现有地图已上传：</strong>建图会覆盖现有地图，确认无误后再开始建图</span>
-    </div>
-                        <div class="notice-item">
-                            <el-icon class="notice-icon">
-                                <Warning />
-                            </el-icon>
-                            <span><strong>确保导航已停止：</strong>建图前必须停止所有导航任务，避免冲突</span>
-                        </div>
-                        <div class="notice-item">
-                            <el-icon class="notice-icon">
-                                <Warning />
-                            </el-icon>
-                            <span><strong>建图范围不宜过大：</strong>建议在较小区域内进行建图，避免数据量过大导致处理缓慢</span>
-                        </div>
-                        <div class="notice-item">
-                            <el-icon class="notice-icon">
-                                <Warning />
-                            </el-icon>
-                            <span><strong>确保机器狗稳定：</strong>建图过程中请保持机器狗稳定，避免剧烈运动</span>
-                        </div>
-                        <div class="notice-item">
-                            <el-icon class="notice-icon">
-                                <InfoFilled />
-                            </el-icon>
-                            <span><strong>建图完成后：</strong>点击"停止建图"按钮将自动保存所有文件</span>
-                        </div>
-                    </div>
-                </div>
-                <!-- 启动中阶段：显示启动状态 -->
-                <div v-else-if="mappingStarting" class="mapping-starting">
-                    <el-alert type="info" :closable="false" show-icon>
-                        <template #title>
-                            <div style="font-weight: bold; margin-bottom: 12px;">正在启动建图...</div>
-                        </template>
-                    </el-alert>
-                    <div class="mapping-status-content">
-                        <div class="status-info">
-                            <el-icon class="status-icon">
-                                <Location />
-                            </el-icon>
-                            <div class="status-text">
-                                <div class="status-title">等待建图启动</div>
-                                <div class="status-desc">正在启动建图进程，请稍候...</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <!-- 建图中阶段：显示状态和停止按钮 -->
-                <div v-else class="mapping-status">
-                    <el-alert type="success" :closable="false" show-icon>
-                        <template #title>
-                            <div style="font-weight: bold; margin-bottom: 12px;">建图正在运行中...</div>
-                        </template>
-                    </el-alert>
-                    <div class="mapping-status-content">
-                        <div class="status-info">
-                            <el-icon class="status-icon">
-                                <Location />
-                            </el-icon>
-                            <div class="status-text">
-                                <div class="status-title">建图进行中</div>
-                                <div class="status-desc">正在构建地图</div>
-                            </div>
-                        </div>
-                        <div class="status-tips">
-                            <div class="tip-item">
-                                <el-icon>
-                                    <InfoFilled />
-                                </el-icon>
-                                <span>建图过程中请保持机器狗稳定移动</span>
-                            </div>
-                            <div class="tip-item">
-                                <el-icon>
-                                    <InfoFilled />
-                                </el-icon>
-                                <span>停止建图后将自动保存所有文件</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <template #footer>
-                <el-button v-if="!isMapping && !mappingStarting"
-                    @click="showMappingConfirmDialog = false">取消</el-button>
-                <el-button v-if="!isMapping" type="primary" @click="confirmStartMapping" :loading="mappingStarting"
-                    :disabled="mappingStarting">
-                    {{ mappingStarting ? '正在启动...' : '确认开始建图' }}
-                </el-button>
-                <el-button v-if="isMapping" type="danger" @click="handleStopMapping" :loading="mappingStopping"
-                    size="large">
-                    <el-icon style="margin-right: 5px;">
-                        <Delete />
-                    </el-icon>
-                    停止建图
-                </el-button>
-            </template>
-        </el-dialog>
-
-    </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button
+          v-if="!isMapping && !mappingStarting"
+          @click="showMappingConfirmDialog = false"
+        >
+          取消
+        </el-button>
+        <el-button
+          v-if="!isMapping"
+          type="primary"
+          :loading="mappingStarting"
+          :disabled="mappingStarting"
+          @click="confirmStartMapping"
+        >
+          {{ mappingStarting ? '正在启动...' : '确认开始建图' }}
+        </el-button>
+        <el-button
+          v-if="isMapping"
+          type="danger"
+          :loading="mappingStopping"
+          size="large"
+          @click="handleStopMapping"
+        >
+          <el-icon style="margin-right: 5px;">
+            <Delete />
+          </el-icon>
+          停止建图
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -2862,7 +3305,9 @@ const drawAt = (x: number, y: number) => {
         ctx.arc(x, y, brushSize.value / 2, 0, Math.PI * 2)
         ctx.fill()
     } else if (currentTool.value === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out'
+        // 橡皮擦语义：恢复为空白可通行区域（白色），避免导出时因透明度导致反色。
+        ctx.globalCompositeOperation = 'source-over'
+        ctx.fillStyle = '#FFFFFF'
         ctx.beginPath()
         ctx.arc(x, y, brushSize.value / 2, 0, Math.PI * 2)
         ctx.fill()
@@ -2889,8 +3334,9 @@ const drawLine = (x1: number, y1: number, x2: number, y2: number) => {
         ctx.lineTo(x2, y2)
         ctx.stroke()
     } else if (currentTool.value === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out'
-        ctx.strokeStyle = 'rgba(0,0,0,1)'
+        // 橡皮擦直接涂白，保持像素值与导出PGM一致。
+        ctx.globalCompositeOperation = 'source-over'
+        ctx.strokeStyle = '#FFFFFF'
         ctx.lineWidth = brushSize.value
         ctx.lineCap = 'round'
         ctx.beginPath()
@@ -3101,7 +3547,10 @@ const saveMap = async () => {
         // 提取灰度值（取R通道，因为灰度图R=G=B）
         const grayData = new Uint8Array(width * height)
         for (let i = 0; i < width * height; i++) {
-            grayData[i] = data[i * 4] // 取R通道
+            const idx = i * 4
+            const alpha = data[idx + 3]
+            // 透明像素按白色导出，避免历史透明擦除数据导出成黑色。
+            grayData[i] = alpha === 0 ? 255 : data[idx]
         }
 
         // 合并头部和数据

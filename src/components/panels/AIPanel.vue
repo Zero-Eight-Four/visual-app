@@ -1,207 +1,424 @@
 <template>
-    <div class="ai-panel">
-        <el-tabs v-model="activeTab" class="demo-tabs">
-            <el-tab-pane label="视频检测" name="video">
-                <div class="tab-content">
-                    <!-- Server Video Library -->
-                    <div class="folder-section">
-                        <div class="filter-bar">
-                            <el-select v-model="selectedDate" placeholder="选择日期" style="width: 200px; margin-right: 10px;" @change="handleDateChange">
-                                <el-option
-                                    v-for="date in availableDates"
-                                    :key="date"
-                                    :label="date"
-                                    :value="date"
-                                />
-                            </el-select>
-                            <el-button @click="refreshVideoList" :icon="Refresh">刷新列表</el-button>
-                        </div>
-
-                        <div v-if="selectedDate && videosByDate && videosByDate[selectedDate]" class="video-list">
-                            <el-table :data="videosByDate[selectedDate]" style="width: 100%" @selection-change="handleSelectionChange">
-                                <el-table-column type="selection" width="55" />
-                                <el-table-column prop="name" label="文件名" />
-                                <el-table-column prop="size" label="大小" width="120">
-                                    <template #default="scope">
-                                        {{ (scope.row.size / 1024 / 1024).toFixed(2) }} MB
-                                    </template>
-                                </el-table-column>
-                            </el-table>
-                            
-                            <div style="margin-top: 15px; text-align: left;">
-                                <el-button type="primary" @click="submitBatchServerVideos" :disabled="selectedVideos.length === 0" :loading="loading">
-                                    检测选中视频
-                                </el-button>
-                            </div>
-                        </div>
-                        <div v-else class="empty-state">
-                            <el-empty description="请选择日期查看视频" />
-                        </div>
-                    </div>
-
-                    <!-- Results Display -->
-                    <div v-if="detectionResults.length > 0" class="results-section">
-                        <h3>检测结果</h3>
-                        <el-scrollbar height="400px">
-                            <el-card v-for="(item, index) in detectionResults" :key="index" class="result-card" shadow="hover">
-                                <template #header>
-                                    <div class="card-header">
-                                        <span>{{ item.filename }}</span>
-                                        <el-tag :type="item.result?.['异常发现'] ? 'danger' : 'success'">
-                                            {{ item.result?.['异常发现'] ? '异常' : '正常' }}
-                                        </el-tag>
-                                    </div>
-                                </template>
-                                <div class="result-content">
-                                    <p><strong>异常类型:</strong> {{ item.result?.['异常类型']?.join(', ') || '无' }}</p>
-                                    <p><strong>描述:</strong> {{ item.result?.['异常描述'] }}</p>
-                                    <p><strong>严重程度:</strong> {{ item.result?.['严重程度'] }}</p>
-                                    <p><strong>建议:</strong> {{ item.result?.['建议处理'] }}</p>
-                                    <div v-if="item.report_url" style="margin-top: 10px;">
-                                        <el-link :href="getReportFullUrl(item.report_url)" target="_blank" type="primary">查看报告</el-link>
-                                    </div>
-                                </div>
-                            </el-card>
-                        </el-scrollbar>
-                    </div>
-                </div>
-            </el-tab-pane>
-
-            <el-tab-pane label="视频流管理" name="streams">
-                <div class="tab-content">
-                    <div class="stream-actions">
-                        <el-button type="primary" @click="showAddStreamDialog = true">添加视频流</el-button>
-                        <el-button @click="refreshStreams">刷新列表</el-button>
-                    </div>
-                    
-                    <el-table :data="streams" style="width: 100%; margin-top: 20px;" v-loading="streamsLoading">
-                        <el-table-column prop="name" label="名称" width="150" />
-                        <el-table-column prop="rtsp_url" label="RTSP地址" show-overflow-tooltip />
-                        <el-table-column prop="location" label="位置" width="120" />
-                        <el-table-column label="操作" width="250">
-                            <template #default="scope">
-                                <el-button size="small" @click="openScheduleDialog(scope.row)">定时录制</el-button>
-                                <el-button type="danger" size="small" @click="deleteStream(scope.row.id)">删除</el-button>
-                            </template>
-                        </el-table-column>
-                    </el-table>
-                </div>
-            </el-tab-pane>
-
-            <el-tab-pane label="历史报告" name="reports">
-                <div class="tab-content">
-                    <el-button @click="refreshReports" style="margin-bottom: 20px;">刷新列表</el-button>
-                    
-                    <el-collapse v-model="activeReportDates">
-                        <el-collapse-item v-for="(group, date) in groupedReports" :key="date" :title="date + ' (' + group.length + ')'" :name="date">
-                            <el-table :data="group" style="width: 100%">
-                                <el-table-column prop="name" label="报告名称" />
-                                <el-table-column label="生成时间" width="180">
-                                    <template #default="scope">
-                                        {{ formatTime(scope.row.modified) }}
-                                    </template>
-                                </el-table-column>
-                                <el-table-column label="操作" width="180">
-                                    <template #default="scope">
-                                        <el-link :href="getReportDownloadUrl(scope.row.name)" target="_blank" type="primary" style="margin-right: 10px;">查看</el-link>
-                                        <el-button type="danger" size="small" link @click="deleteReport(scope.row.name)">删除</el-button>
-                                    </template>
-                                </el-table-column>
-                            </el-table>
-                        </el-collapse-item>
-                    </el-collapse>
-                </div>
-            </el-tab-pane>
-        </el-tabs>
-
-        <!-- Add Stream Dialog -->
-        <el-dialog v-model="showAddStreamDialog" title="添加视频流" width="500px">
-            <el-form :model="streamForm" label-width="100px">
-                <el-form-item label="RTSP地址">
-                    <el-input v-model="streamForm.rtsp_url" placeholder="rtsp://..." />
-                </el-form-item>
-                <el-form-item label="名称">
-                    <el-input v-model="streamForm.name" placeholder="摄像头1" />
-                </el-form-item>
-                <el-form-item label="位置">
-                    <el-input v-model="streamForm.location" placeholder="正门" />
-                </el-form-item>
-                <el-form-item label="描述">
-                    <el-input v-model="streamForm.description" type="textarea" />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <span class="dialog-footer">
-                    <el-button @click="showAddStreamDialog = false">取消</el-button>
-                    <el-button type="primary" @click="submitAddStream" :loading="addStreamLoading">确定</el-button>
-                </span>
-            </template>
-        </el-dialog>
-
-        <!-- Schedule Dialog -->
-        <el-dialog v-model="showScheduleDialog" title="定时录制设置" width="600px">
-            <div style="margin-bottom: 20px;">
-                <p>当前视频流: <strong>{{ currentStream?.name || currentStream?.rtsp_url }}</strong></p>
+  <div class="ai-panel">
+    <el-tabs
+      v-model="activeTab"
+      class="demo-tabs"
+    >
+      <el-tab-pane
+        label="视频检测"
+        name="video"
+      >
+        <div class="tab-content">
+          <!-- Server Video Library -->
+          <div class="folder-section">
+            <div class="filter-bar">
+              <el-select
+                v-model="selectedDate"
+                placeholder="选择日期"
+                style="width: 200px; margin-right: 10px;"
+                @change="handleDateChange"
+              >
+                <el-option
+                  v-for="date in availableDates"
+                  :key="date"
+                  :label="date"
+                  :value="date"
+                />
+              </el-select>
+              <el-button
+                :icon="Refresh"
+                @click="refreshVideoList"
+              >
+                刷新列表
+              </el-button>
             </div>
-            
-            <el-table :data="schedules" style="width: 100%; margin-bottom: 20px;" v-loading="schedulesLoading">
-                <el-table-column prop="start_time" label="开始时间" width="100" />
-                <el-table-column prop="duration_minutes" label="时长(分)" width="100" />
-                <el-table-column label="重复" width="150">
-                    <template #default="scope">
-                        {{ formatDays(scope.row.days) }}
-                    </template>
-                </el-table-column>
-                <el-table-column label="状态" width="100">
-                    <template #default="scope">
-                        <el-switch v-model="scope.row.enabled" @change="toggleSchedule(scope.row)" />
-                    </template>
-                </el-table-column>
-                <el-table-column label="操作">
-                    <template #default="scope">
-                        <el-button type="danger" size="small" @click="deleteSchedule(scope.row.id)">删除</el-button>
-                    </template>
-                </el-table-column>
-            </el-table>
 
-            <el-divider>添加新计划</el-divider>
+            <div
+              v-if="selectedDate && videosByDate && videosByDate[selectedDate]"
+              class="video-list"
+            >
+              <el-table
+                :data="videosByDate[selectedDate]"
+                style="width: 100%"
+                @selection-change="handleSelectionChange"
+              >
+                <el-table-column
+                  type="selection"
+                  width="55"
+                />
+                <el-table-column
+                  prop="name"
+                  label="文件名"
+                />
+                <el-table-column
+                  prop="size"
+                  label="大小"
+                  width="120"
+                >
+                  <template #default="scope">
+                    {{ (scope.row.size / 1024 / 1024).toFixed(2) }} MB
+                  </template>
+                </el-table-column>
+              </el-table>
+                            
+              <div style="margin-top: 15px; text-align: left;">
+                <el-button
+                  type="primary"
+                  :disabled="selectedVideos.length === 0"
+                  :loading="loading"
+                  @click="submitBatchServerVideos"
+                >
+                  检测选中视频
+                </el-button>
+              </div>
+            </div>
+            <div
+              v-else
+              class="empty-state"
+            >
+              <el-empty description="请选择日期查看视频" />
+            </div>
+          </div>
+
+          <!-- Results Display -->
+          <div
+            v-if="detectionResults.length > 0"
+            class="results-section"
+          >
+            <h3>检测结果</h3>
+            <el-scrollbar height="400px">
+              <el-card
+                v-for="(item, index) in detectionResults"
+                :key="index"
+                class="result-card"
+                shadow="hover"
+              >
+                <template #header>
+                  <div class="card-header">
+                    <span>{{ item.filename }}</span>
+                    <el-tag :type="item.result?.['异常发现'] ? 'danger' : 'success'">
+                      {{ item.result?.['异常发现'] ? '异常' : '正常' }}
+                    </el-tag>
+                  </div>
+                </template>
+                <div class="result-content">
+                  <p><strong>异常类型:</strong> {{ item.result?.['异常类型']?.join(', ') || '无' }}</p>
+                  <p><strong>描述:</strong> {{ item.result?.['异常描述'] }}</p>
+                  <p><strong>严重程度:</strong> {{ item.result?.['严重程度'] }}</p>
+                  <p><strong>建议:</strong> {{ item.result?.['建议处理'] }}</p>
+                  <div
+                    v-if="item.report_url"
+                    style="margin-top: 10px;"
+                  >
+                    <el-link
+                      :href="getReportFullUrl(item.report_url)"
+                      target="_blank"
+                      type="primary"
+                    >
+                      查看报告
+                    </el-link>
+                  </div>
+                </div>
+              </el-card>
+            </el-scrollbar>
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane
+        label="视频流管理"
+        name="streams"
+      >
+        <div class="tab-content">
+          <div class="stream-actions">
+            <el-button
+              type="primary"
+              @click="showAddStreamDialog = true"
+            >
+              添加视频流
+            </el-button>
+            <el-button @click="refreshStreams">
+              刷新列表
+            </el-button>
+          </div>
+                    
+          <el-table
+            v-loading="streamsLoading"
+            :data="streams"
+            style="width: 100%; margin-top: 20px;"
+          >
+            <el-table-column
+              prop="name"
+              label="名称"
+              width="150"
+            />
+            <el-table-column
+              prop="rtsp_url"
+              label="RTSP地址"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="location"
+              label="位置"
+              width="120"
+            />
+            <el-table-column
+              label="操作"
+              width="250"
+            >
+              <template #default="scope">
+                <el-button
+                  size="small"
+                  @click="openScheduleDialog(scope.row)"
+                >
+                  定时录制
+                </el-button>
+                <el-button
+                  type="danger"
+                  size="small"
+                  @click="deleteStream(scope.row.id)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane
+        label="历史报告"
+        name="reports"
+      >
+        <div class="tab-content">
+          <el-button
+            style="margin-bottom: 20px;"
+            @click="refreshReports"
+          >
+            刷新列表
+          </el-button>
+                    
+          <el-collapse v-model="activeReportDates">
+            <el-collapse-item
+              v-for="(group, date) in groupedReports"
+              :key="date"
+              :title="date + ' (' + group.length + ')'"
+              :name="date"
+            >
+              <el-table
+                :data="group"
+                style="width: 100%"
+              >
+                <el-table-column
+                  prop="name"
+                  label="报告名称"
+                />
+                <el-table-column
+                  label="生成时间"
+                  width="180"
+                >
+                  <template #default="scope">
+                    {{ formatTime(scope.row.modified) }}
+                  </template>
+                </el-table-column>
+                <el-table-column
+                  label="操作"
+                  width="180"
+                >
+                  <template #default="scope">
+                    <el-link
+                      :href="getReportDownloadUrl(scope.row.name)"
+                      target="_blank"
+                      type="primary"
+                      style="margin-right: 10px;"
+                    >
+                      查看
+                    </el-link>
+                    <el-button
+                      type="danger"
+                      size="small"
+                      link
+                      @click="deleteReport(scope.row.name)"
+                    >
+                      删除
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- Add Stream Dialog -->
+    <el-dialog
+      v-model="showAddStreamDialog"
+      title="添加视频流"
+      width="500px"
+    >
+      <el-form
+        :model="streamForm"
+        label-width="100px"
+      >
+        <el-form-item label="RTSP地址">
+          <el-input
+            v-model="streamForm.rtsp_url"
+            placeholder="rtsp://..."
+          />
+        </el-form-item>
+        <el-form-item label="名称">
+          <el-input
+            v-model="streamForm.name"
+            placeholder="摄像头1"
+          />
+        </el-form-item>
+        <el-form-item label="位置">
+          <el-input
+            v-model="streamForm.location"
+            placeholder="正门"
+          />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input
+            v-model="streamForm.description"
+            type="textarea"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="showAddStreamDialog = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="addStreamLoading"
+            @click="submitAddStream"
+          >确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- Schedule Dialog -->
+    <el-dialog
+      v-model="showScheduleDialog"
+      title="定时录制设置"
+      width="600px"
+    >
+      <div style="margin-bottom: 20px;">
+        <p>当前视频流: <strong>{{ currentStream?.name || currentStream?.rtsp_url }}</strong></p>
+      </div>
             
-            <el-form :model="scheduleForm" label-width="100px">
-                <el-form-item label="开始时间">
-                    <el-time-select
-                        v-model="scheduleForm.start_time"
-                        start="00:00"
-                        step="00:15"
-                        end="23:45"
-                        placeholder="选择时间"
-                    />
-                </el-form-item>
-                <el-form-item label="录制时长">
-                    <el-input-number v-model="scheduleForm.duration" :min="1" :max="1440" label="分钟" /> 分钟
-                </el-form-item>
-                <el-form-item label="重复周期">
-                    <el-checkbox-group v-model="scheduleForm.days">
-                        <el-checkbox label="1">周一</el-checkbox>
-                        <el-checkbox label="2">周二</el-checkbox>
-                        <el-checkbox label="3">周三</el-checkbox>
-                        <el-checkbox label="4">周四</el-checkbox>
-                        <el-checkbox label="5">周五</el-checkbox>
-                        <el-checkbox label="6">周六</el-checkbox>
-                        <el-checkbox label="0">周日</el-checkbox>
-                    </el-checkbox-group>
-                </el-form-item>
-                <el-form-item label="启用">
-                    <el-switch v-model="scheduleForm.enabled" />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <span class="dialog-footer">
-                    <el-button @click="showScheduleDialog = false">关闭</el-button>
-                    <el-button type="primary" @click="submitAddSchedule" :loading="addScheduleLoading">添加计划</el-button>
-                </span>
-            </template>
-        </el-dialog>
-    </div>
+      <el-table
+        v-loading="schedulesLoading"
+        :data="schedules"
+        style="width: 100%; margin-bottom: 20px;"
+      >
+        <el-table-column
+          prop="start_time"
+          label="开始时间"
+          width="100"
+        />
+        <el-table-column
+          prop="duration_minutes"
+          label="时长(分)"
+          width="100"
+        />
+        <el-table-column
+          label="重复"
+          width="150"
+        >
+          <template #default="scope">
+            {{ formatDays(scope.row.days) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="状态"
+          width="100"
+        >
+          <template #default="scope">
+            <el-switch
+              v-model="scope.row.enabled"
+              @change="toggleSchedule(scope.row)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作">
+          <template #default="scope">
+            <el-button
+              type="danger"
+              size="small"
+              @click="deleteSchedule(scope.row.id)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-divider>添加新计划</el-divider>
+            
+      <el-form
+        :model="scheduleForm"
+        label-width="100px"
+      >
+        <el-form-item label="开始时间">
+          <el-time-select
+            v-model="scheduleForm.start_time"
+            start="00:00"
+            step="00:15"
+            end="23:45"
+            placeholder="选择时间"
+          />
+        </el-form-item>
+        <el-form-item label="录制时长">
+          <el-input-number
+            v-model="scheduleForm.duration"
+            :min="1"
+            :max="1440"
+            label="分钟"
+          /> 分钟
+        </el-form-item>
+        <el-form-item label="重复周期">
+          <el-checkbox-group v-model="scheduleForm.days">
+            <el-checkbox label="1">
+              周一
+            </el-checkbox>
+            <el-checkbox label="2">
+              周二
+            </el-checkbox>
+            <el-checkbox label="3">
+              周三
+            </el-checkbox>
+            <el-checkbox label="4">
+              周四
+            </el-checkbox>
+            <el-checkbox label="5">
+              周五
+            </el-checkbox>
+            <el-checkbox label="6">
+              周六
+            </el-checkbox>
+            <el-checkbox label="0">
+              周日
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="scheduleForm.enabled" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="showScheduleDialog = false">关闭</el-button>
+          <el-button
+            type="primary"
+            :loading="addScheduleLoading"
+            @click="submitAddSchedule"
+          >添加计划</el-button>
+        </span>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup lang="ts">

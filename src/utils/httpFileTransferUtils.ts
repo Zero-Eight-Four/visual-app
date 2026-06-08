@@ -58,7 +58,7 @@ export class HttpFileTransferClient {
    * 构造请求 URL，并附带代理所需的机器人参数
    */
   private buildRequestUrl(endpoint: string): string {
-    let url = this.getApiUrl(endpoint)
+    const url = this.getApiUrl(endpoint)
 
     if (!this.config.robotUrl) {
       return url
@@ -493,7 +493,7 @@ export function extractHttpUrlFromWsUrl(wsUrl: string, httpPort?: number): strin
   } catch (error) {
     // 如果解析失败，尝试简单替换
     const fallbackPort = Number.isFinite(httpPort) && (httpPort || 0) > 0 ? (httpPort as number) : 8080
-    let httpUrl = wsUrl
+    const httpUrl = wsUrl
       .replace('ws://', 'http://')
       .replace('wss://', 'https://')
       .replace(/:\d+/, `:${fallbackPort}`)

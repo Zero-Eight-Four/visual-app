@@ -1,273 +1,459 @@
 <template>
-    <div class="settings-panel">
-        <el-scrollbar height="100%">
-            <div class="settings-content">
-                <!-- 摄像头选择 -->
-                <div class="settings-section">
-                    <div class="section-header">
-                        <el-icon>
-                            <VideoCamera />
-                        </el-icon>
-                        <span>摄像头</span>
-                    </div>
-                    <el-select id="image-topic-select" v-model="selectedTopic" placeholder="选择摄像头" filterable
-                        size="small" @change="handleTopicChange">
-                        <el-option v-for="(topic, index) in imageTopics" :key="topic.name"
-                            :label="getCameraLabel(index)" :value="topic.name" />
-                    </el-select>
-                </div>
+  <div class="settings-panel">
+    <el-scrollbar height="100%">
+      <div class="settings-content">
+        <!-- 摄像头选择 -->
+        <div class="settings-section">
+          <div class="section-header">
+            <el-icon>
+              <VideoCamera />
+            </el-icon>
+            <span>摄像头</span>
+          </div>
+          <el-select
+            id="image-topic-select"
+            v-model="selectedTopic"
+            placeholder="选择摄像头"
+            filterable
+            size="small"
+            @change="handleTopicChange"
+          >
+            <el-option
+              v-for="(topic, index) in imageTopics"
+              :key="topic.name"
+              :label="getCameraLabel(index)"
+              :value="topic.name"
+            />
+          </el-select>
+        </div>
 
-                <!-- 录制控制 -->
-                <div class="settings-section">
-                    <div class="section-header">
-                        <el-icon>
-                            <VideoCamera />
-                        </el-icon>
-                        <span>录制控制</span>
-                    </div>
-                    <div class="recording-controls">
-                        <el-button v-if="!isRecording" type="danger" size="small" @click="handleStartRecording"
-                            style="width: 100%; margin-bottom: 8px;">
-                            <el-icon style="margin-right: 5px;">
-                                <VideoCamera />
-                            </el-icon>
-                            开始录制
-                        </el-button>
-                        <el-button v-else type="success" size="small" @click="handleStopRecording"
-                            style="width: 100%; margin-bottom: 8px;">
-                            <el-icon style="margin-right: 5px;">
-                                <VideoPause />
-                            </el-icon>
-                            停止录制
-                        </el-button>
-                        <div v-if="isRecording" class="recording-status">
-                            <span class="recording-dot"></span>
-                            <span>录制中... {{ recordingTime }}</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="settings-section">
-                    <el-button size="small" @click="showVideoManagerDialog = true" style="width: 100%;">
-                        <el-icon style="margin-right: 5px;">
-                            <FolderOpened />
-                        </el-icon>
-                        视频管理
-                    </el-button>
-                </div>
+        <!-- 录制控制 -->
+        <div class="settings-section">
+          <div class="section-header">
+            <el-icon>
+              <VideoCamera />
+            </el-icon>
+            <span>录制控制</span>
+          </div>
+          <div class="recording-controls">
+            <el-button
+              v-if="!isRecording"
+              type="danger"
+              size="small"
+              style="width: 100%; margin-bottom: 8px;"
+              @click="handleStartRecording"
+            >
+              <el-icon style="margin-right: 5px;">
+                <VideoCamera />
+              </el-icon>
+              开始录制
+            </el-button>
+            <el-button
+              v-else
+              type="success"
+              size="small"
+              style="width: 100%; margin-bottom: 8px;"
+              @click="handleStopRecording"
+            >
+              <el-icon style="margin-right: 5px;">
+                <VideoPause />
+              </el-icon>
+              停止录制
+            </el-button>
+            <div
+              v-if="isRecording"
+              class="recording-status"
+            >
+              <span class="recording-dot" />
+              <span>录制中... {{ recordingTime }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <el-button
+            size="small"
+            style="width: 100%;"
+            @click="showVideoManagerDialog = true"
+          >
+            <el-icon style="margin-right: 5px;">
+              <FolderOpened />
+            </el-icon>
+            视频管理
+          </el-button>
+        </div>
 
-                <!-- 云台控制 -->
-                <div class="settings-section">
-                    <div class="section-header">
-                        <el-icon>
-                            <Position />
-                        </el-icon>
-                        <span>云台控制</span>
-                    </div>
+        <!-- 云台控制 -->
+        <div class="settings-section">
+          <div class="section-header">
+            <el-icon>
+              <Position />
+            </el-icon>
+            <span>云台控制</span>
+          </div>
 
-                    <!-- 方向控制 -->
-                    <div class="ptz-grid">
-                        <div class="ptz-row">
-                            <div class="ptz-cell empty" />
-                            <div class="ptz-cell">
-                                <el-button class="ptz-btn" :icon="ArrowUp" circle size="small"
-                                    @click="publishPtzCommand('rotate_up')" title="上转" />
-                            </div>
-                            <div class="ptz-cell empty" />
-                        </div>
-                        <div class="ptz-row">
-                            <div class="ptz-cell">
-                                <el-button class="ptz-btn" :icon="ArrowLeft" circle size="small"
-                                    @mousedown="publishPtzCommand('rotate_left')" 
-                                    @mouseup="publishPtzCommand('stop')"
-                                    @mouseleave="publishPtzCommand('stop')"
-                                    @touchstart.prevent="publishPtzCommand('rotate_left')"
-                                    @touchend.prevent="publishPtzCommand('stop')"
-                                    title="左转（按住旋转）" />
-                            </div>
-                            <div class="ptz-cell">
-                                <el-button class="ptz-btn ptz-stop" circle size="small"
-                                    @click="publishPtzCommand('center')" title="居中">
-                                    <el-icon>
-                                        <Position />
-                                    </el-icon>
-                                </el-button>
-                            </div>
-                            <div class="ptz-cell">
-                                <el-button class="ptz-btn" :icon="ArrowRight" circle size="small"
-                                    @mousedown="publishPtzCommand('rotate_right')" 
-                                    @mouseup="publishPtzCommand('stop')"
-                                    @mouseleave="publishPtzCommand('stop')"
-                                    @touchstart.prevent="publishPtzCommand('rotate_right')"
-                                    @touchend.prevent="publishPtzCommand('stop')"
-                                    title="右转（按住旋转）" />
-                            </div>
-                        </div>
-                        <div class="ptz-row">
-                            <div class="ptz-cell empty" />
-                            <div class="ptz-cell">
-                                <el-button class="ptz-btn" :icon="ArrowDown" circle size="small"
-                                    @click="publishPtzCommand('rotate_down')" title="下转" />
-                            </div>
-                            <div class="ptz-cell empty" />
-                        </div>
-                    </div>
+          <!-- 方向控制 -->
+          <div class="ptz-grid">
+            <div class="ptz-row">
+              <div class="ptz-cell empty" />
+              <div class="ptz-cell">
+                <el-button
+                  class="ptz-btn"
+                  :icon="ArrowUp"
+                  circle
+                  size="small"
+                  title="上转"
+                  @click="publishPtzCommand('rotate_up')"
+                />
+              </div>
+              <div class="ptz-cell empty" />
+            </div>
+            <div class="ptz-row">
+              <div class="ptz-cell">
+                <el-button
+                  class="ptz-btn"
+                  :icon="ArrowLeft"
+                  circle
+                  size="small"
+                  title="左转（按住旋转）" 
+                  @mousedown="publishPtzCommand('rotate_left')"
+                  @mouseup="publishPtzCommand('stop')"
+                  @mouseleave="publishPtzCommand('stop')"
+                  @touchstart.prevent="publishPtzCommand('rotate_left')"
+                  @touchend.prevent="publishPtzCommand('stop')"
+                />
+              </div>
+              <div class="ptz-cell">
+                <el-button
+                  class="ptz-btn ptz-stop"
+                  circle
+                  size="small"
+                  title="居中"
+                  @click="publishPtzCommand('center')"
+                >
+                  <el-icon>
+                    <Position />
+                  </el-icon>
+                </el-button>
+              </div>
+              <div class="ptz-cell">
+                <el-button
+                  class="ptz-btn"
+                  :icon="ArrowRight"
+                  circle
+                  size="small"
+                  title="右转（按住旋转）" 
+                  @mousedown="publishPtzCommand('rotate_right')"
+                  @mouseup="publishPtzCommand('stop')"
+                  @mouseleave="publishPtzCommand('stop')"
+                  @touchstart.prevent="publishPtzCommand('rotate_right')"
+                  @touchend.prevent="publishPtzCommand('stop')"
+                />
+              </div>
+            </div>
+            <div class="ptz-row">
+              <div class="ptz-cell empty" />
+              <div class="ptz-cell">
+                <el-button
+                  class="ptz-btn"
+                  :icon="ArrowDown"
+                  circle
+                  size="small"
+                  title="下转"
+                  @click="publishPtzCommand('rotate_down')"
+                />
+              </div>
+              <div class="ptz-cell empty" />
+            </div>
+          </div>
 
-                    <!-- 缩放和功能 -->
-                    <div class="ptz-controls">
-                        <div class="control-group">
-                            <span class="control-label">缩放</span>
-                            <div class="control-buttons">
-                                <el-button class="ptz-btn" :icon="ZoomOut" circle size="small"
-                                    @click="publishPtzCommand('zoom_out')" title="缩小" />
-                                <el-button class="ptz-btn" :icon="ZoomIn" circle size="small"
-                                    @click="publishPtzCommand('zoom_in')" title="放大" />
-                            </div>
-                        </div>
+          <!-- 缩放和功能 -->
+          <div class="ptz-controls">
+            <div class="control-group">
+              <span class="control-label">缩放</span>
+              <div class="control-buttons">
+                <el-button
+                  class="ptz-btn"
+                  :icon="ZoomOut"
+                  circle
+                  size="small"
+                  title="缩小"
+                  @click="publishPtzCommand('zoom_out')"
+                />
+                <el-button
+                  class="ptz-btn"
+                  :icon="ZoomIn"
+                  circle
+                  size="small"
+                  title="放大"
+                  @click="publishPtzCommand('zoom_in')"
+                />
+              </div>
+            </div>
                         
-                        <div class="control-group">
-                            <span class="control-label">旋转</span>
-                            <div class="control-buttons">
-                                <el-button class="ptz-btn" :icon="RefreshLeft" circle size="small"
-                                    @mousedown="publishPtzCommand('spin_left')" 
-                                    @mouseup="publishPtzCommand('stop')"
-                                    @mouseleave="publishPtzCommand('stop')"
-                                    @touchstart.prevent="publishPtzCommand('spin_left')"
-                                    @touchend.prevent="publishPtzCommand('stop')"
-                                    title="持续左转（按住）" />
-                                <el-button class="ptz-btn" :icon="VideoPause" circle size="small"
-                                    @click="publishPtzCommand('stop')" title="停止" />
-                                <el-button class="ptz-btn" :icon="RefreshRight" circle size="small"
-                                    @mousedown="publishPtzCommand('spin_right')" 
-                                    @mouseup="publishPtzCommand('stop')"
-                                    @mouseleave="publishPtzCommand('stop')"
-                                    @touchstart.prevent="publishPtzCommand('spin_right')"
-                                    @touchend.prevent="publishPtzCommand('stop')"
-                                    title="持续右转（按住）" />
-                            </div>
-                        </div>
-    
-                    </div>
-                </div>
+            <div class="control-group">
+              <span class="control-label">旋转</span>
+              <div class="control-buttons">
+                <el-button
+                  class="ptz-btn"
+                  :icon="RefreshLeft"
+                  circle
+                  size="small"
+                  title="持续左转（按住）" 
+                  @mousedown="publishPtzCommand('spin_left')"
+                  @mouseup="publishPtzCommand('stop')"
+                  @mouseleave="publishPtzCommand('stop')"
+                  @touchstart.prevent="publishPtzCommand('spin_left')"
+                  @touchend.prevent="publishPtzCommand('stop')"
+                />
+                <el-button
+                  class="ptz-btn"
+                  :icon="VideoPause"
+                  circle
+                  size="small"
+                  title="停止"
+                  @click="publishPtzCommand('stop')"
+                />
+                <el-button
+                  class="ptz-btn"
+                  :icon="RefreshRight"
+                  circle
+                  size="small"
+                  title="持续右转（按住）" 
+                  @mousedown="publishPtzCommand('spin_right')"
+                  @mouseup="publishPtzCommand('stop')"
+                  @mouseleave="publishPtzCommand('stop')"
+                  @touchstart.prevent="publishPtzCommand('spin_right')"
+                  @touchend.prevent="publishPtzCommand('stop')"
+                />
+              </div>
             </div>
-        </el-scrollbar>
+          </div>
+        </div>
+      </div>
+    </el-scrollbar>
 
-        <!-- 录制设置对话框 -->
-        <el-dialog v-model="showRecordingDialog" title="录制设置" width="400px">
-            <el-form :model="recordingSettings" label-width="120px">
-                <el-form-item label="录制模式">
-                    <el-radio-group v-model="recordingSettings.mode">
-                        <el-radio label="continuous">持续录制</el-radio>
-                        <el-radio label="segmented">分段录制</el-radio>
-                    </el-radio-group>
-                </el-form-item>
-                <el-form-item v-if="recordingSettings.mode === 'segmented'" label="分段时长（分钟）">
-                    <el-input-number v-model="recordingSettings.segmentMinutes" :min="1" :max="60" />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="showRecordingDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmStartRecording">确认</el-button>
-            </template>
-        </el-dialog>
+    <!-- 录制设置对话框 -->
+    <el-dialog
+      v-model="showRecordingDialog"
+      title="录制设置"
+      width="400px"
+    >
+      <el-form
+        :model="recordingSettings"
+        label-width="120px"
+      >
+        <el-form-item label="录制模式">
+          <el-radio-group v-model="recordingSettings.mode">
+            <el-radio label="continuous">
+              持续录制
+            </el-radio>
+            <el-radio label="segmented">
+              分段录制
+            </el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item
+          v-if="recordingSettings.mode === 'segmented'"
+          label="分段时长（分钟）"
+        >
+          <el-input-number
+            v-model="recordingSettings.segmentMinutes"
+            :min="1"
+            :max="60"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRecordingDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="confirmStartRecording"
+        >
+          确认
+        </el-button>
+      </template>
+    </el-dialog>
 
-        <!-- 视频管理对话框 -->
-        <el-dialog v-model="showVideoManagerDialog" title="视频管理" width="1200px" :close-on-click-modal="false" @open="loadVideoList">
-            <div class="video-manager-container">
+    <!-- 视频管理对话框 -->
+    <el-dialog
+      v-model="showVideoManagerDialog"
+      title="视频管理"
+      width="1200px"
+      :close-on-click-modal="false"
+      @open="loadVideoList"
+    >
+      <div class="video-manager-container">
+        <el-table 
+          :data="videoList" 
+          style="width: 100%" 
+          max-height="600" 
+          row-key="folder" 
+          :default-expand-all="false" 
+          :expand-row-keys="defaultExpandKeys"
+          stripe
+          border
+        >
+          <el-table-column
+            type="expand"
+            width="50"
+          >
+            <template #default="{ row }">
+              <div class="video-list-container">
                 <el-table 
-                    :data="videoList" 
-                    style="width: 100%" 
-                    max-height="600" 
-                    row-key="folder" 
-                    :default-expand-all="false" 
-                    :expand-row-keys="defaultExpandKeys"
-                    stripe
-                    border>
-                    <el-table-column type="expand" width="50">
-                        <template #default="{ row }">
-                            <div class="video-list-container">
-                                <el-table 
-                                    :data="row.videos" 
-                                    style="width: 100%" 
-                                    size="small"
-                                    stripe
-                                    border>
-                                    <el-table-column prop="name" label="文件名" min-width="300" show-overflow-tooltip>
-                                        <template #default="{ row: video }">
-                                            <span class="video-name">{{ video.name }}</span>
-                                        </template>
-                                    </el-table-column>
-                                    <el-table-column prop="size" label="大小" width="120" align="right">
-                                        <template #default="{ row: video }">
-                                            <span class="video-size">{{ typeof video.size === 'number' ? (video.size / 1024 / 1024).toFixed(2) + ' MB' : video.size }}</span>
-                                        </template>
-                                    </el-table-column>
-                                    <el-table-column prop="modified" label="修改时间" width="200" align="center">
-                                        <template #default="{ row: video }">
-                                            <span class="video-time">{{ typeof video.modified === 'number' ? new Date(video.modified * 1000).toLocaleString() : video.modified }}</span>
-                                        </template>
-                                    </el-table-column>
-                                    <el-table-column label="操作" width="320" fixed="right" align="center">
-                                        <template #default="{ row: video }">
-                                            <div class="video-actions">
-                                                <el-button size="small" @click="handleRenameVideo(video)" style="margin-right: 8px;">
-                                                    <el-icon style="margin-right: 4px;">
-                                                        <Edit />
-                                                    </el-icon>
-                                                    重命名
-                                                </el-button>
-                                                <el-button size="small" type="primary" @click="handleDownloadVideo(video)" style="margin-right: 8px;">
-                                                    <el-icon style="margin-right: 4px;">
-                                                        <Download />
-                                                    </el-icon>
-                                                    下载
-                                                </el-button>
-                                                <el-button size="small" type="danger" @click="handleDeleteVideo(video)">
-                                                    <el-icon style="margin-right: 4px;">
-                                                        <Delete />
-                                                    </el-icon>
-                                                    删除
-                                                </el-button>
-                                            </div>
-                                        </template>
-                                    </el-table-column>
-                                </el-table>
-                            </div>
-                        </template>
-                    </el-table-column>
-                    <el-table-column prop="date" label="日期" min-width="200" align="center">
-                        <template #default="{ row }">
-                            <span class="folder-date">{{ row.date }}</span>
-                        </template>
-                    </el-table-column>
-                    <el-table-column prop="count" label="视频数量" min-width="150" align="center">
-                        <template #default="{ row }">
-                            <el-tag type="info" size="small">{{ row.count }} 个视频</el-tag>
-                        </template>
-                    </el-table-column>
-                    <el-table-column label="操作" width="120" align="center" fixed="right">
-                        <template #default="{ row }">
-                            <el-button size="small" type="primary" link @click="toggleExpand(row.folder)">
-                                {{ defaultExpandKeys.includes(row.folder) ? '收起' : '展开' }}
-                            </el-button>
-                        </template>
-                    </el-table-column>
+                  :data="row.videos" 
+                  style="width: 100%" 
+                  size="small"
+                  stripe
+                  border
+                >
+                  <el-table-column
+                    prop="name"
+                    label="文件名"
+                    min-width="300"
+                    show-overflow-tooltip
+                  >
+                    <template #default="{ row: video }">
+                      <span class="video-name">{{ video.name }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column
+                    prop="size"
+                    label="大小"
+                    width="120"
+                    align="right"
+                  >
+                    <template #default="{ row: video }">
+                      <span class="video-size">{{ typeof video.size === 'number' ? (video.size / 1024 / 1024).toFixed(2) + ' MB' : video.size }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column
+                    prop="modified"
+                    label="修改时间"
+                    width="200"
+                    align="center"
+                  >
+                    <template #default="{ row: video }">
+                      <span class="video-time">{{ typeof video.modified === 'number' ? new Date(video.modified * 1000).toLocaleString() : video.modified }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column
+                    label="操作"
+                    width="320"
+                    fixed="right"
+                    align="center"
+                  >
+                    <template #default="{ row: video }">
+                      <div class="video-actions">
+                        <el-button
+                          size="small"
+                          style="margin-right: 8px;"
+                          @click="handleRenameVideo(video)"
+                        >
+                          <el-icon style="margin-right: 4px;">
+                            <Edit />
+                          </el-icon>
+                          重命名
+                        </el-button>
+                        <el-button
+                          size="small"
+                          type="primary"
+                          style="margin-right: 8px;"
+                          @click="handleDownloadVideo(video)"
+                        >
+                          <el-icon style="margin-right: 4px;">
+                            <Download />
+                          </el-icon>
+                          下载
+                        </el-button>
+                        <el-button
+                          size="small"
+                          type="danger"
+                          @click="handleDeleteVideo(video)"
+                        >
+                          <el-icon style="margin-right: 4px;">
+                            <Delete />
+                          </el-icon>
+                          删除
+                        </el-button>
+                      </div>
+                    </template>
+                  </el-table-column>
                 </el-table>
-            </div>
-        </el-dialog>
-
-        <!-- 重命名对话框 -->
-        <el-dialog v-model="showRenameDialog" title="重命名视频" width="400px">
-            <el-form>
-                <el-form-item label="新文件名">
-                    <el-input v-model="renameNewName" />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="showRenameDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmRenameVideo">确认</el-button>
+              </div>
             </template>
-        </el-dialog>
-    </div>
+          </el-table-column>
+          <el-table-column
+            prop="date"
+            label="日期"
+            min-width="200"
+            align="center"
+          >
+            <template #default="{ row }">
+              <span class="folder-date">{{ row.date }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="count"
+            label="视频数量"
+            min-width="150"
+            align="center"
+          >
+            <template #default="{ row }">
+              <el-tag
+                type="info"
+                size="small"
+              >
+                {{ row.count }} 个视频
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="操作"
+            width="120"
+            align="center"
+            fixed="right"
+          >
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="primary"
+                link
+                @click="toggleExpand(row.folder)"
+              >
+                {{ defaultExpandKeys.includes(row.folder) ? '收起' : '展开' }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-dialog>
+
+    <!-- 重命名对话框 -->
+    <el-dialog
+      v-model="showRenameDialog"
+      title="重命名视频"
+      width="400px"
+    >
+      <el-form>
+        <el-form-item label="新文件名">
+          <el-input v-model="renameNewName" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRenameDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="confirmRenameVideo"
+        >
+          确认
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup lang="ts">

@@ -1,488 +1,819 @@
 <template>
-    <div class="settings-panel">
-        <el-scrollbar height="100%">
-            <div class="settings-content">
-                <!-- 导航控制 -->
-                <div class="settings-section">
-                    <div class="section-header">
-                        <el-icon>
-                            <Location />
-                        </el-icon>
-                        <span>系统控制</span>
-                    </div>
-                    <div class="button-container">
-                        <div style="width: 100%; display: flex; gap: 8px;">
-                            <el-button :type="isNavigationRunning ? 'warning' : 'success'" plain size="small"
-                                style="flex: 1" :loading="navigationLoading" @click="handleToggleNavigation">
-                                <el-icon style="margin-right: 4px">
-                                    <VideoPlay v-if="!isNavigationRunning" />
-                                    <VideoPause v-else />
-                                </el-icon>
-                                {{ isNavigationRunning ? '停止' : '加载地图' }}
-                            </el-button>
-                            <el-button type="primary" plain size="small" style="flex: 1"
-                                :disabled="!isConnected" @click="showControlDialog = true">
-                                <el-icon style="margin-right: 4px">
-                                    <SwitchButton />
-                                </el-icon>
-                                机器狗控制
-                            </el-button>
-                        </div>
-                        <div v-if="isNavigationRunning"
-                            style="margin-top: 8px; padding: 8px; background-color: #f0f9ff; border-radius: 4px; font-size: 12px; color: #409eff;">
-                            <el-icon style="margin-right: 4px">
-                                <CircleCheck />
-                            </el-icon>
-                            导航系统运行中
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 安全设置 -->
-                <div class="settings-section">
-                    <div class="section-header">
-                        <el-icon>
-                            <Warning />
-                        </el-icon>
-                        <span>安全设置</span>
-                    </div>
-                    <div class="setting-item">
-                        <span class="label">最低启动电量 (%)</span>
-                        <el-input-number v-model="minBatteryLevel" :min="0" :max="100" size="small" />
-                    </div>
-                    <div v-if="isLowBattery" class="warning-text" style="color: #f56c6c; font-size: 12px; margin-top: 5px;">
-                        <el-icon><Warning /></el-icon> 当前电量过低 ({{ rosStore.robotStatus?.battery_soc }}%)，禁止启动
-                    </div>
-                </div>
-
-                <!-- 任务文件管理 -->
-                <div class="settings-section">
-                    <div class="section-header">
-                        <el-icon>
-                            <FolderOpened />
-                        </el-icon>
-                        <span>路线管理</span>
-                    </div>
-
-                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                        <el-select v-model="queueName" placeholder="选择路线名称" size="small" filterable clearable
-                            class="queue-select" style="flex: 1;" :disabled="!isNavigationRunning || !isConnected">
-                            <el-option v-for="name in availableQueues" :key="name" :label="name" :value="name" />
-                        </el-select>
-                        <el-button size="small" :loading="isRefreshingList" title="刷新列表"
-                            :disabled="!isNavigationRunning || !isConnected" @click="refreshQueueList">
-                            <el-icon>
-                                <Refresh />
-                            </el-icon>
-                        </el-button>
-                    </div>
-                    <div class="button-grid compact">
-                        <el-button size="small" :disabled="!isNavigationRunning || !isConnected"
-                            @click="handleSaveQueue">
-                            <el-icon>
-                                <FolderAdd />
-                            </el-icon>
-                            保存
-                        </el-button>
-                        <el-button size="small" :disabled="!isNavigationRunning || !isConnected || !queueName"
-                            @click="handleLoadQueue">
-                            <el-icon>
-                                <FolderOpened />
-                            </el-icon>
-                            加载
-                        </el-button>
-                        <el-button size="small" type="danger"
-                            :disabled="!isNavigationRunning || !isConnected || !queueName" @click="confirmDeleteNamed">
-                            <el-icon>
-                                <FolderDelete />
-                            </el-icon>
-                            删除
-                        </el-button>
-                    </div>
-                </div>
-
-                <!-- 任务控制 -->
-                <div class="settings-section">
-                    <div class="section-header">
-                        <el-icon>
-                            <Operation />
-                        </el-icon>
-                        <span>路线控制</span>
-                    </div>
-                    <div class="button-container">
-                        <div style="width: 100%; display: flex; gap: 8px; margin-bottom: 8px;">
-                            <el-button type="success" plain size="small" style="flex: 1"
-                                :disabled="!isNavigationRunning || !isConnected || isLowBattery"
-                                @click="publishCommand('/goal_queue/start')">
-                                <el-icon style="margin-right: 4px">
-                                    <VideoPlay />
-                                </el-icon>
-                                开始
-                            </el-button>
-                            <el-button type="warning" plain size="small" style="flex: 1"
-                                :disabled="!isNavigationRunning || !isConnected"
-                                @click="publishCommand('/goal_queue/stop')">
-                                <el-icon style="margin-right: 4px">
-                                    <VideoPause />
-                                </el-icon>
-                                停止
-                            </el-button>
-                        </div>
-                        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                            <el-button type="danger" plain size="small" style="flex: 1"
-                                :disabled="!isNavigationRunning || !isConnected"
-                                @click="publishCommand('/goal_queue/clear')">
-                                <el-icon style="margin-right: 4px">
-                                    <Delete />
-                                </el-icon>
-                                清空
-                            </el-button>
-                        </div>
-
-                        <!-- 定时启动 -->
-                        <div class="control-group-label" style="margin-top: 0;">
-                            定时启动
-                        </div>
-                        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                            <el-button type="primary" plain size="small"
-                                style="flex: 1" :disabled="!isConnected"
-                                @click="handleScheduledStartSimple">
-                                <el-icon style="margin-right: 4px">
-                                    <Clock />
-                                </el-icon>
-                                添加定时任务
-                            </el-button>
-                        </div>
-                        <!-- 提示信息 -->
-                        <div style="margin-bottom: 8px; font-size: 12px; color: #909399;">
-                            <el-icon style="margin-right: 4px; vertical-align: -2px;"><InfoFilled /></el-icon>
-                            定时任务将保存在服务器端，无需保持网页开启。
-                        </div>
-
-
-                        <!-- 循环模式设置 -->
-                        <div class="control-group-label" style="margin-top: 0;">
-                            循环模式设置
-                        </div>
-                        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
-                            <el-button :type="loopMode === -1 ? 'primary' : 'default'" plain size="small"
-                                style="flex: 1" :disabled="!isNavigationRunning || !isConnected"
-                                @click="setLoopMode(-1)">
-                                无限循环
-                            </el-button>
-                            <el-button :type="loopMode === 0 ? 'primary' : 'default'" plain size="small" style="flex: 1"
-                                :disabled="!isNavigationRunning || !isConnected" @click="setLoopMode(0)">
-                                单次运行
-                            </el-button>
-                            <el-button :type="loopMode > 0 ? 'primary' : 'default'" plain size="small" style="flex: 1"
-                                :disabled="!isNavigationRunning || !isConnected" @click="handleSetLoopCount">
-                                指定次数
-                            </el-button>
-                        </div>
-                        <div v-if="loopMode > 0"
-                            style="margin-bottom: 8px; padding: 6px; background-color: #f5f7fa; border-radius: 4px; font-size: 12px; color: #606266;">
-                            <el-icon style="margin-right: 4px;">
-                                <InfoFilled />
-                            </el-icon>
-                            当前设置：循环 {{ loopMode }} 次
-                        </div>
-
-                        <!-- 任务状态显示 -->
-                        <div v-if="taskStatus.queueSize > 0"
-                            style="margin-top: 8px; padding: 8px; background-color: #f0f9ff; border-radius: 4px; font-size: 12px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                                <span style="color: #606266;">队列点数：</span>
-                                <span style="color: #409eff; font-weight: 500;">{{ taskStatus.queueSize }}</span>
-                            </div>
-                            <div v-if="taskStatus.isRunning"
-                                style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                                <span style="color: #606266;">当前点：</span>
-                                <span style="color: #67c23a; font-weight: 500;">{{ taskStatus.currentIndex + 1 }} / {{
-                                    taskStatus.queueSize }}</span>
-                            </div>
-                            <div v-if="taskStatus.isRunning && loopMode !== 0"
-                                style="display: flex; justify-content: space-between;">
-                                <span style="color: #606266;">循环进度：</span>
-                                <span style="color: #409eff; font-weight: 500;">
-                                    <span v-if="loopMode === -1">第 {{ taskStatus.currentLoop + 1 }} 轮</span>
-                                    <span v-else>{{ taskStatus.currentLoop }} / {{ loopMode }} 轮</span>
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 任务编辑 -->
-                <div class="settings-section">
-                    <div class="section-header">
-                        <el-icon>
-                            <EditPen />
-                        </el-icon>
-                        <span>路线编辑</span>
-                    </div>
-
-                    <div class="control-group-label">
-                        添加点位
-                    </div>
-                    <div class="button-grid">
-                        <el-button :type="publishType === 'pose_estimate' ? 'primary' : 'default'" size="small"
-                            :disabled="!isNavigationRunning || !isConnected"
-                            @click="handlePublishCommand('pose_estimate')">
-                            <el-icon>
-                                <Position />
-                            </el-icon>
-                            初始位姿
-                        </el-button>
-                        <el-button :type="publishType === 'pose' ? 'primary' : 'default'" size="small"
-                            :disabled="!isNavigationRunning || !isConnected" @click="handlePublishCommand('pose')">
-                            <el-icon>
-                                <Aim />
-                            </el-icon>
-                            目标点位
-                        </el-button>
-                    </div>
-
-                    <div class="control-group-label" style="margin-top: 12px;">
-                        修改点位
-                    </div>
-                    <div class="button-grid">
-                        <el-button size="small" :disabled="!isNavigationRunning || !isConnected"
-                            @click="handleModifyPoint">
-                            <el-icon style="margin-right: 4px">
-                                <Edit />
-                            </el-icon>
-                            修改
-                        </el-button>
-                        <el-button size="small" :disabled="!isNavigationRunning || !isConnected"
-                            @click="handleInsertPoint">
-                            <el-icon style="margin-right: 4px">
-                                <Plus />
-                            </el-icon>
-                            插入
-                        </el-button>
-                        <el-button size="small" :disabled="!isNavigationRunning || !isConnected"
-                            @click="handleToggleRecord">
-                            <el-icon style="margin-right: 4px">
-                                <VideoCamera />
-                            </el-icon>
-                            录制
-                        </el-button>
-                        <el-button size="small" type="danger" plain
-                            :disabled="!isNavigationRunning || !isConnected" @click="handleDeletePoint">
-                            <el-icon style="margin-right: 4px">
-                                <Minus />
-                            </el-icon>
-                            删除
-                        </el-button>
-                    </div>
-                </div>
+  <div class="settings-panel">
+    <el-scrollbar height="100%">
+      <div class="settings-content">
+        <!-- 导航控制 -->
+        <div class="settings-section">
+          <div class="section-header">
+            <el-icon>
+              <Location />
+            </el-icon>
+            <span>系统控制</span>
+          </div>
+          <div class="button-container">
+            <div style="width: 100%; display: flex; gap: 8px;">
+              <el-button
+                :type="isNavigationRunning ? 'warning' : 'success'"
+                plain
+                size="small"
+                style="flex: 1"
+                :loading="navigationLoading"
+                @click="handleToggleNavigation"
+              >
+                <el-icon style="margin-right: 4px">
+                  <VideoPlay v-if="!isNavigationRunning" />
+                  <VideoPause v-else />
+                </el-icon>
+                {{ isNavigationRunning ? '停止' : '加载地图' }}
+              </el-button>
+              <el-button
+                type="primary"
+                plain
+                size="small"
+                style="flex: 1"
+                :disabled="!isConnected"
+                @click="showControlDialog = true"
+              >
+                <el-icon style="margin-right: 4px">
+                  <SwitchButton />
+                </el-icon>
+                机器狗控制
+              </el-button>
             </div>
-        </el-scrollbar>
+            <div
+              v-if="isNavigationRunning"
+              style="margin-top: 8px; padding: 8px; background-color: #f0f9ff; border-radius: 4px; font-size: 12px; color: #409eff;"
+            >
+              <el-icon style="margin-right: 4px">
+                <CircleCheck />
+              </el-icon>
+              导航系统运行中
+            </div>
+          </div>
+        </div>
 
-        <!-- 时间选择对话框 -->
-        <el-dialog v-model="showTimePickerDialog" title="设置每周定时巡检任务" width="450px" :close-on-click-modal="false">
-            <el-form label-width="80px">
-                <div style="margin-bottom: 15px; color: #606266; font-size: 13px;">
-                    设置机器狗自动执行任务的时间计划。到达时间后，机器狗将自动起立并开始执行巡检队列。
-                </div>
+        <!-- 安全设置 -->
+        <div class="settings-section">
+          <div class="section-header">
+            <el-icon>
+              <Warning />
+            </el-icon>
+            <span>安全设置</span>
+          </div>
+          <div class="setting-item">
+            <span class="label">最低启动电量 (%)</span>
+            <el-input-number
+              v-model="minBatteryLevel"
+              :min="0"
+              :max="100"
+              size="small"
+            />
+          </div>
+          <div
+            v-if="isLowBattery"
+            class="warning-text"
+            style="color: #f56c6c; font-size: 12px; margin-top: 5px;"
+          >
+            <el-icon><Warning /></el-icon> 当前电量过低 ({{ rosStore.robotStatus?.battery_soc }}%)，禁止启动
+          </div>
+        </div>
+
+        <!-- 任务文件管理 -->
+        <div class="settings-section">
+          <div class="section-header">
+            <el-icon>
+              <FolderOpened />
+            </el-icon>
+            <span>路线管理</span>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <el-select
+              v-model="queueName"
+              placeholder="选择路线名称"
+              size="small"
+              filterable
+              clearable
+              class="queue-select"
+              style="flex: 1;"
+              :disabled="!isNavigationRunning || !isConnected"
+            >
+              <el-option
+                v-for="name in availableQueues"
+                :key="name"
+                :label="name"
+                :value="name"
+              />
+            </el-select>
+            <el-button
+              size="small"
+              :loading="isRefreshingList"
+              title="刷新列表"
+              :disabled="!isNavigationRunning || !isConnected"
+              @click="refreshQueueList"
+            >
+              <el-icon>
+                <Refresh />
+              </el-icon>
+            </el-button>
+          </div>
+          <div class="button-grid compact">
+            <el-button
+              size="small"
+              :disabled="!isNavigationRunning || !isConnected"
+              @click="handleSaveQueue"
+            >
+              <el-icon>
+                <FolderAdd />
+              </el-icon>
+              保存
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="!isNavigationRunning || !isConnected || !queueName"
+              @click="handleLoadQueue"
+            >
+              <el-icon>
+                <FolderOpened />
+              </el-icon>
+              加载
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              :disabled="!isNavigationRunning || !isConnected || !queueName"
+              @click="confirmDeleteNamed"
+            >
+              <el-icon>
+                <FolderDelete />
+              </el-icon>
+              删除
+            </el-button>
+          </div>
+        </div>
+
+        <!-- 任务控制 -->
+        <div class="settings-section">
+          <div class="section-header">
+            <el-icon>
+              <Operation />
+            </el-icon>
+            <span>路线控制</span>
+          </div>
+          <div class="button-container">
+            <div style="width: 100%; display: flex; gap: 8px; margin-bottom: 8px;">
+              <el-button
+                type="success"
+                plain
+                size="small"
+                style="flex: 1"
+                :disabled="!isNavigationRunning || !isConnected || isLowBattery"
+                @click="publishCommand('/goal_queue/start')"
+              >
+                <el-icon style="margin-right: 4px">
+                  <VideoPlay />
+                </el-icon>
+                开始
+              </el-button>
+              <el-button
+                type="warning"
+                plain
+                size="small"
+                style="flex: 1"
+                :disabled="!isNavigationRunning || !isConnected"
+                @click="publishCommand('/goal_queue/stop')"
+              >
+                <el-icon style="margin-right: 4px">
+                  <VideoPause />
+                </el-icon>
+                停止
+              </el-button>
+            </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+              <el-button
+                type="danger"
+                plain
+                size="small"
+                style="flex: 1"
+                :disabled="!isNavigationRunning || !isConnected"
+                @click="publishCommand('/goal_queue/clear')"
+              >
+                <el-icon style="margin-right: 4px">
+                  <Delete />
+                </el-icon>
+                清空
+              </el-button>
+            </div>
+
+            <!-- 定时启动 -->
+            <div
+              class="control-group-label"
+              style="margin-top: 0;"
+            >
+              定时启动
+            </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+              <el-button
+                type="primary"
+                plain
+                size="small"
+                style="flex: 1"
+                :disabled="!isConnected"
+                @click="handleScheduledStartSimple"
+              >
+                <el-icon style="margin-right: 4px">
+                  <Clock />
+                </el-icon>
+                添加定时任务
+              </el-button>
+            </div>
+            <!-- 提示信息 -->
+            <div style="margin-bottom: 8px; font-size: 12px; color: #909399;">
+              <el-icon style="margin-right: 4px; vertical-align: -2px;">
+                <InfoFilled />
+              </el-icon>
+              定时任务将保存在服务器端，无需保持网页开启。
+            </div>
+
+
+            <!-- 循环模式设置 -->
+            <div
+              class="control-group-label"
+              style="margin-top: 0;"
+            >
+              循环模式设置
+            </div>
+            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+              <el-button
+                :type="loopMode === -1 ? 'primary' : 'default'"
+                plain
+                size="small"
+                style="flex: 1"
+                :disabled="!isNavigationRunning || !isConnected"
+                @click="setLoopMode(-1)"
+              >
+                无限循环
+              </el-button>
+              <el-button
+                :type="loopMode === 0 ? 'primary' : 'default'"
+                plain
+                size="small"
+                style="flex: 1"
+                :disabled="!isNavigationRunning || !isConnected"
+                @click="setLoopMode(0)"
+              >
+                单次运行
+              </el-button>
+              <el-button
+                :type="loopMode > 0 ? 'primary' : 'default'"
+                plain
+                size="small"
+                style="flex: 1"
+                :disabled="!isNavigationRunning || !isConnected"
+                @click="handleSetLoopCount"
+              >
+                指定次数
+              </el-button>
+            </div>
+            <div
+              v-if="loopMode > 0"
+              style="margin-bottom: 8px; padding: 6px; background-color: #f5f7fa; border-radius: 4px; font-size: 12px; color: #606266;"
+            >
+              <el-icon style="margin-right: 4px;">
+                <InfoFilled />
+              </el-icon>
+              当前设置：循环 {{ loopMode }} 次
+            </div>
+
+            <!-- 任务状态显示 -->
+            <div
+              v-if="taskStatus.queueSize > 0"
+              style="margin-top: 8px; padding: 8px; background-color: #f0f9ff; border-radius: 4px; font-size: 12px;"
+            >
+              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                <span style="color: #606266;">队列点数：</span>
+                <span style="color: #409eff; font-weight: 500;">{{ taskStatus.queueSize }}</span>
+              </div>
+              <div
+                v-if="taskStatus.isRunning"
+                style="display: flex; justify-content: space-between; margin-bottom: 4px;"
+              >
+                <span style="color: #606266;">当前点：</span>
+                <span style="color: #67c23a; font-weight: 500;">{{ taskStatus.currentIndex + 1 }} / {{
+                  taskStatus.queueSize }}</span>
+              </div>
+              <div
+                v-if="taskStatus.isRunning && loopMode !== 0"
+                style="display: flex; justify-content: space-between;"
+              >
+                <span style="color: #606266;">循环进度：</span>
+                <span style="color: #409eff; font-weight: 500;">
+                  <span v-if="loopMode === -1">第 {{ taskStatus.currentLoop + 1 }} 轮</span>
+                  <span v-else>{{ taskStatus.currentLoop }} / {{ loopMode }} 轮</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 任务编辑 -->
+        <div class="settings-section">
+          <div class="section-header">
+            <el-icon>
+              <EditPen />
+            </el-icon>
+            <span>路线编辑</span>
+          </div>
+
+          <div class="control-group-label">
+            添加点位
+          </div>
+          <div class="button-grid">
+            <el-button
+              :type="publishType === 'pose_estimate' ? 'primary' : 'default'"
+              size="small"
+              :disabled="!isNavigationRunning || !isConnected"
+              @click="handlePublishCommand('pose_estimate')"
+            >
+              <el-icon>
+                <Position />
+              </el-icon>
+              初始位姿
+            </el-button>
+            <el-button
+              :type="publishType === 'pose' ? 'primary' : 'default'"
+              size="small"
+              :disabled="!isNavigationRunning || !isConnected"
+              @click="handlePublishCommand('pose')"
+            >
+              <el-icon>
+                <Aim />
+              </el-icon>
+              目标点位
+            </el-button>
+          </div>
+
+          <div
+            class="control-group-label"
+            style="margin-top: 12px;"
+          >
+            修改点位
+          </div>
+          <div class="button-grid">
+            <el-button
+              size="small"
+              :disabled="!isNavigationRunning || !isConnected"
+              @click="handleModifyPoint"
+            >
+              <el-icon style="margin-right: 4px">
+                <Edit />
+              </el-icon>
+              修改
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="!isNavigationRunning || !isConnected"
+              @click="handleInsertPoint"
+            >
+              <el-icon style="margin-right: 4px">
+                <Plus />
+              </el-icon>
+              插入
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="!isNavigationRunning || !isConnected"
+              @click="handleToggleRecord"
+            >
+              <el-icon style="margin-right: 4px">
+                <VideoCamera />
+              </el-icon>
+              录制
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              plain
+              :disabled="!isNavigationRunning || !isConnected"
+              @click="handleDeletePoint"
+            >
+              <el-icon style="margin-right: 4px">
+                <Minus />
+              </el-icon>
+              删除
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </el-scrollbar>
+
+    <!-- 时间选择对话框 -->
+    <el-dialog
+      v-model="showTimePickerDialog"
+      title="设置每周定时巡检任务"
+      width="450px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="80px">
+        <div style="margin-bottom: 15px; color: #606266; font-size: 13px;">
+          设置机器狗自动执行任务的时间计划。到达时间后，机器狗将自动起立并开始执行巡检队列。
+        </div>
                 
-                <el-form-item label="任务名称">
-                    <el-input v-model="scheduleName" placeholder="例如：每日晨检" />
-                </el-form-item>
+        <el-form-item label="任务名称">
+          <el-input
+            v-model="scheduleName"
+            placeholder="例如：每日晨检"
+          />
+        </el-form-item>
 
-                <el-form-item label="启动时间">
-                    <el-time-picker v-model="selectedTime" format="HH:mm" value-format="HH:mm" placeholder="选择时间"
-                        style="width: 100%" />
-                </el-form-item>
+        <el-form-item label="启动时间">
+          <el-time-picker
+            v-model="selectedTime"
+            format="HH:mm"
+            value-format="HH:mm"
+            placeholder="选择时间"
+            style="width: 100%"
+          />
+        </el-form-item>
 
-                <el-form-item label="重复周期">
-                    <el-checkbox-group v-model="scheduleDays">
-                        <el-checkbox :label="1">周一</el-checkbox>
-                        <el-checkbox :label="2">周二</el-checkbox>
-                        <el-checkbox :label="3">周三</el-checkbox>
-                        <el-checkbox :label="4">周四</el-checkbox>
-                        <el-checkbox :label="5">周五</el-checkbox>
-                        <el-checkbox :label="6">周六</el-checkbox>
-                        <el-checkbox :label="0">周日</el-checkbox>
-                    </el-checkbox-group>
-                </el-form-item>
+        <el-form-item label="重复周期">
+          <el-checkbox-group v-model="scheduleDays">
+            <el-checkbox :label="1">
+              周一
+            </el-checkbox>
+            <el-checkbox :label="2">
+              周二
+            </el-checkbox>
+            <el-checkbox :label="3">
+              周三
+            </el-checkbox>
+            <el-checkbox :label="4">
+              周四
+            </el-checkbox>
+            <el-checkbox :label="5">
+              周五
+            </el-checkbox>
+            <el-checkbox :label="6">
+              周六
+            </el-checkbox>
+            <el-checkbox :label="0">
+              周日
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
 
-                <el-form-item label="启用状态">
-                    <el-switch v-model="scheduleEnabled" active-text="启用" inactive-text="禁用" />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="showTimePickerDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmScheduledStart">保存任务</el-button>
-            </template>
-        </el-dialog>
+        <el-form-item label="启用状态">
+          <el-switch
+            v-model="scheduleEnabled"
+            active-text="启用"
+            inactive-text="禁用"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showTimePickerDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="confirmScheduledStart"
+        >
+          保存任务
+        </el-button>
+      </template>
+    </el-dialog>
 
-        <!-- 录制状态设置对话框 -->
-        <el-dialog v-model="showRecordDialog" title="设置点位录制状态" width="400px">
-            <el-form label-width="100px">
-                <el-form-item label="点位索引">
-                    <el-input-number v-model="recordPointIndex" :min="1" placeholder="请输入点号" style="width: 100%" />
-                </el-form-item>
-                <el-form-item label="录制状态">
-                    <el-radio-group v-model="recordStatus">
-                        <el-radio :label="1">录制</el-radio>
-                        <el-radio :label="0">不录制</el-radio>
-                    </el-radio-group>
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="showRecordDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmToggleRecord">确定</el-button>
-            </template>
-        </el-dialog>
+    <!-- 录制状态设置对话框 -->
+    <el-dialog
+      v-model="showRecordDialog"
+      title="设置点位录制状态"
+      width="400px"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="点位索引">
+          <el-input-number
+            v-model="recordPointIndex"
+            :min="1"
+            placeholder="请输入点号"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="录制状态">
+          <el-radio-group v-model="recordStatus">
+            <el-radio :label="1">
+              录制
+            </el-radio>
+            <el-radio :label="0">
+              不录制
+            </el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRecordDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="confirmToggleRecord"
+        >
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
 
-        <!-- 机器狗控制对话框 -->
-        <el-dialog v-model="showControlDialog" title="机器狗控制" width="340px" :close-on-click-modal="false">
-            <div class="control-panel">
-                <div class="control-group">
-                    <div class="control-label">运动控制</div>
-                    <div class="direction-pad">
-                        <div class="pad-row">
-                            <el-button class="pad-btn" :icon="DArrowLeft" 
-                                @mousedown="startMove('turn_left')" @mouseup="stopMove" @mouseleave="stopMove"
-                                @touchstart.prevent="startMove('turn_left')" @touchend.prevent="stopMove"
-                                title="左转" />
-                            <el-button class="pad-btn" type="primary" :icon="ArrowUp" 
-                                @mousedown="startMove('forward')" @mouseup="stopMove" @mouseleave="stopMove"
-                                @touchstart.prevent="startMove('forward')" @touchend.prevent="stopMove"
-                                title="前进" />
-                            <el-button class="pad-btn" :icon="DArrowRight" 
-                                @mousedown="startMove('turn_right')" @mouseup="stopMove" @mouseleave="stopMove"
-                                @touchstart.prevent="startMove('turn_right')" @touchend.prevent="stopMove"
-                                title="右转" />
-                        </div>
-                        <div class="pad-row">
-                            <el-button class="pad-btn" :icon="ArrowLeft" 
-                                @mousedown="startMove('left')" @mouseup="stopMove" @mouseleave="stopMove"
-                                @touchstart.prevent="startMove('left')" @touchend.prevent="stopMove"
-                                title="左移" />
-                            <el-button class="pad-btn stop-btn" type="danger" :icon="VideoPause" @click="stopMove" title="停止" />
-                            <el-button class="pad-btn" :icon="ArrowRight" 
-                                @mousedown="startMove('right')" @mouseup="stopMove" @mouseleave="stopMove"
-                                @touchstart.prevent="startMove('right')" @touchend.prevent="stopMove"
-                                title="右移" />
-                        </div>
-                        <div class="pad-row">
-                            <div class="pad-spacer"></div>
-                            <el-button class="pad-btn" :icon="ArrowDown" 
-                                @mousedown="startMove('backward')" @mouseup="stopMove" @mouseleave="stopMove"
-                                @touchstart.prevent="startMove('backward')" @touchend.prevent="stopMove"
-                                title="后退" />
-                            <div class="pad-spacer"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="control-group">
-                    <div class="control-label">模式切换</div>
-                    <div class="action-buttons">
-                        <el-button type="primary" plain style="flex: 1" @click="switchMode('lingdong')">
-                            灵动模式
-                        </el-button>
-                        <el-button type="info" plain style="flex: 1" @click="switchMode('classic')">
-                            经典模式
-                        </el-button>
-                    </div>
-                </div>
-
-                <div class="control-group">
-                    <div class="control-label">姿态控制</div>
-                    <div class="action-buttons">
-                        <el-button type="success" style="flex: 1" @click="handleRobotAction('up')">
-                            <el-icon style="margin-right: 4px"><CaretTop /></el-icon>
-                            起立
-                        </el-button>
-                        <el-button type="warning" style="flex: 1" @click="handleRobotAction('down')">
-                            <el-icon style="margin-right: 4px"><CaretBottom /></el-icon>
-                            趴下
-                        </el-button>
-                    </div>
-                </div>
+    <!-- 机器狗控制对话框 -->
+    <el-dialog
+      v-model="showControlDialog"
+      title="机器狗控制"
+      width="340px"
+      :close-on-click-modal="false"
+    >
+      <div class="control-panel">
+        <div class="control-group">
+          <div class="control-label">
+            运动控制
+          </div>
+          <div class="direction-pad">
+            <div class="pad-row">
+              <el-button
+                class="pad-btn"
+                :icon="DArrowLeft" 
+                title="左转"
+                @mousedown="startMove('turn_left')"
+                @mouseup="stopMove"
+                @mouseleave="stopMove"
+                @touchstart.prevent="startMove('turn_left')"
+                @touchend.prevent="stopMove"
+              />
+              <el-button
+                class="pad-btn"
+                type="primary"
+                :icon="ArrowUp" 
+                title="前进"
+                @mousedown="startMove('forward')"
+                @mouseup="stopMove"
+                @mouseleave="stopMove"
+                @touchstart.prevent="startMove('forward')"
+                @touchend.prevent="stopMove"
+              />
+              <el-button
+                class="pad-btn"
+                :icon="DArrowRight" 
+                title="右转"
+                @mousedown="startMove('turn_right')"
+                @mouseup="stopMove"
+                @mouseleave="stopMove"
+                @touchstart.prevent="startMove('turn_right')"
+                @touchend.prevent="stopMove"
+              />
             </div>
-        </el-dialog>
+            <div class="pad-row">
+              <el-button
+                class="pad-btn"
+                :icon="ArrowLeft" 
+                title="左移"
+                @mousedown="startMove('left')"
+                @mouseup="stopMove"
+                @mouseleave="stopMove"
+                @touchstart.prevent="startMove('left')"
+                @touchend.prevent="stopMove"
+              />
+              <el-button
+                class="pad-btn stop-btn"
+                type="danger"
+                :icon="VideoPause"
+                title="停止"
+                @click="stopMove"
+              />
+              <el-button
+                class="pad-btn"
+                :icon="ArrowRight" 
+                title="右移"
+                @mousedown="startMove('right')"
+                @mouseup="stopMove"
+                @mouseleave="stopMove"
+                @touchstart.prevent="startMove('right')"
+                @touchend.prevent="stopMove"
+              />
+            </div>
+            <div class="pad-row">
+              <div class="pad-spacer" />
+              <el-button
+                class="pad-btn"
+                :icon="ArrowDown" 
+                title="后退"
+                @mousedown="startMove('backward')"
+                @mouseup="stopMove"
+                @mouseleave="stopMove"
+                @touchstart.prevent="startMove('backward')"
+                @touchend.prevent="stopMove"
+              />
+              <div class="pad-spacer" />
+            </div>
+          </div>
+        </div>
 
-        <!-- 天气信息对话框 -->
-        <el-dialog v-model="showWeatherDialog" title="当前天气" width="400px">
-            <div v-loading="weatherLoading" class="weather-content">
-                <div v-if="weatherError" class="weather-error">
-                    <el-icon color="#F56C6C"><Warning /></el-icon>
-                    <span>{{ weatherError }}</span>
-                </div>
-                <div v-else-if="weatherData" class="weather-info">
-                    <div class="weather-main">
-                        <div class="weather-temp">{{ weatherData.current_condition[0].temp_C }}°C</div>
-                        <div class="weather-desc">{{ weatherDesc }}</div>
-                    </div>
-                    <div class="weather-details">
-                        <div class="detail-item">
-                            <span class="label">湿度:</span>
-                            <span class="value">{{ weatherData.current_condition[0].humidity }}%</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="label">风速:</span>
-                            <span class="value">{{ weatherData.current_condition[0].windspeedKmph }} km/h</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="label">位置:</span>
-                            <span class="value">{{ displayCity }}</span>
-                        </div>
-                    </div>
+        <div class="control-group">
+          <div class="control-label">
+            模式切换
+          </div>
+          <div class="action-buttons">
+            <el-button
+              type="primary"
+              plain
+              style="flex: 1"
+              @click="switchMode('lingdong')"
+            >
+              灵动模式
+            </el-button>
+            <el-button
+              type="info"
+              plain
+              style="flex: 1"
+              @click="switchMode('classic')"
+            >
+              经典模式
+            </el-button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">
+            姿态控制
+          </div>
+          <div class="action-buttons">
+            <el-button
+              type="success"
+              style="flex: 1"
+              @click="handleRobotAction('up')"
+            >
+              <el-icon style="margin-right: 4px">
+                <CaretTop />
+              </el-icon>
+              起立
+            </el-button>
+            <el-button
+              type="warning"
+              style="flex: 1"
+              @click="handleRobotAction('down')"
+            >
+              <el-icon style="margin-right: 4px">
+                <CaretBottom />
+              </el-icon>
+              趴下
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 天气信息对话框 -->
+    <el-dialog
+      v-model="showWeatherDialog"
+      title="当前天气"
+      width="400px"
+    >
+      <div
+        v-loading="weatherLoading"
+        class="weather-content"
+      >
+        <div
+          v-if="weatherError"
+          class="weather-error"
+        >
+          <el-icon color="#F56C6C">
+            <Warning />
+          </el-icon>
+          <span>{{ weatherError }}</span>
+        </div>
+        <div
+          v-else-if="weatherData"
+          class="weather-info"
+        >
+          <div class="weather-main">
+            <div class="weather-temp">
+              {{ weatherData.current_condition[0].temp_C }}°C
+            </div>
+            <div class="weather-desc">
+              {{ weatherDesc }}
+            </div>
+          </div>
+          <div class="weather-details">
+            <div class="detail-item">
+              <span class="label">湿度:</span>
+              <span class="value">{{ weatherData.current_condition[0].humidity }}%</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">风速:</span>
+              <span class="value">{{ weatherData.current_condition[0].windspeedKmph }} km/h</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">位置:</span>
+              <span class="value">{{ displayCity }}</span>
+            </div>
+          </div>
                     
-                    <div v-if="rainInfo" class="weather-rain-info" :class="{ 'is-raining': rainInfo.isRaining }">
-                        <div class="rain-status">
-                            <el-icon :size="20" style="margin-right: 8px;">
-                                <Pouring v-if="rainInfo.isRaining || rainInfo.maxChance > 50" />
-                                <Sunny v-else />
-                            </el-icon>
-                            <span>{{ rainInfo.isRaining ? '当前正在降雨' : '当前无降雨' }}</span>
-                        </div>
-                        <div class="rain-chance">
-                            最高降雨概率: {{ rainInfo.maxChance }}%
-                        </div>
-                    </div>
-
-                    <div v-if="rainInfo && rainInfo.hourlyForecast.length > 0" class="hourly-forecast">
-                        <div class="forecast-title">未来几小时预报</div>
-                        <div class="forecast-list">
-                            <div v-for="(item, index) in rainInfo.hourlyForecast" :key="index" class="forecast-item">
-                                <div class="forecast-time">{{ item.time }}</div>
-                                <div class="forecast-desc">{{ item.desc }}</div>
-                                <div class="forecast-chance" :class="{ 'high-chance': parseInt(item.chance) > 50 }">
-                                    <el-icon v-if="parseInt(item.chance) > 0"><Pouring /></el-icon>
-                                    {{ item.chance }}%
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div v-else class="weather-placeholder">
-                    正在获取天气信息...
-                </div>
-                
-                <div class="city-input" style="margin-top: 20px; display: flex; gap: 10px;">
-                    <el-input v-model="weatherCity" placeholder="输入城市拼音 (如 Beijing)" @keyup.enter="fetchWeather" style="flex: 1">
-                        <template #append>
-                            <el-button :icon="Refresh" @click="fetchWeather" />
-                        </template>
-                    </el-input>
-                    <el-button type="success" plain @click="setDefaultCity" title="设为默认城市">
-                        设为默认
-                    </el-button>
-                </div>
+          <div
+            v-if="rainInfo"
+            class="weather-rain-info"
+            :class="{ 'is-raining': rainInfo.isRaining }"
+          >
+            <div class="rain-status">
+              <el-icon
+                :size="20"
+                style="margin-right: 8px;"
+              >
+                <Pouring v-if="rainInfo.isRaining || rainInfo.maxChance > 50" />
+                <Sunny v-else />
+              </el-icon>
+              <span>{{ rainInfo.isRaining ? '当前正在降雨' : '当前无降雨' }}</span>
             </div>
-            <template #footer>
-                <el-button @click="showWeatherDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmWeatherAndStart" :disabled="weatherLoading">
-                    确认并加载地图
-                </el-button>
+            <div class="rain-chance">
+              最高降雨概率: {{ rainInfo.maxChance }}%
+            </div>
+          </div>
+
+          <div
+            v-if="rainInfo && rainInfo.hourlyForecast.length > 0"
+            class="hourly-forecast"
+          >
+            <div class="forecast-title">
+              未来几小时预报
+            </div>
+            <div class="forecast-list">
+              <div
+                v-for="(item, index) in rainInfo.hourlyForecast"
+                :key="index"
+                class="forecast-item"
+              >
+                <div class="forecast-time">
+                  {{ item.time }}
+                </div>
+                <div class="forecast-desc">
+                  {{ item.desc }}
+                </div>
+                <div
+                  class="forecast-chance"
+                  :class="{ 'high-chance': parseInt(item.chance) > 50 }"
+                >
+                  <el-icon v-if="parseInt(item.chance) > 0">
+                    <Pouring />
+                  </el-icon>
+                  {{ item.chance }}%
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          v-else
+          class="weather-placeholder"
+        >
+          正在获取天气信息...
+        </div>
+                
+        <div
+          class="city-input"
+          style="margin-top: 20px; display: flex; gap: 10px;"
+        >
+          <el-input
+            v-model="weatherCity"
+            placeholder="输入城市拼音 (如 Beijing)"
+            style="flex: 1"
+            @keyup.enter="fetchWeather"
+          >
+            <template #append>
+              <el-button
+                :icon="Refresh"
+                @click="fetchWeather"
+              />
             </template>
-        </el-dialog>
-    </div>
+          </el-input>
+          <el-button
+            type="success"
+            plain
+            title="设为默认城市"
+            @click="setDefaultCity"
+          >
+            设为默认
+          </el-button>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showWeatherDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="weatherLoading"
+          @click="confirmWeatherAndStart"
+        >
+          确认并加载地图
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup lang="ts">

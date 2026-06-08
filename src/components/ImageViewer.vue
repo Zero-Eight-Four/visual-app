@@ -1,101 +1,211 @@
 <template>
-    <div class="image-viewer">
-        <div class="viewer-header">
-            <h3>图像显示</h3>
-            <div class="header-controls">
-                <el-select v-model="selectedImageTopic" placeholder="选择摄像头" size="small" style="width: 200px"
-                    @change="handleTopicChange">
-                    <el-option v-for="topic in imageTopics" :key="topic.name" :label="topic.name" :value="topic.name" />
-                </el-select>
-                <el-button-group style="margin-left: 10px;">
-                    <el-button v-if="!isRecording" type="danger" size="small" @click="handleStartRecording">
-                        <el-icon style="margin-right: 5px;">
-                            <VideoCamera />
-                        </el-icon>
-                        开始录制
-                    </el-button>
-                    <el-button v-else type="success" size="small" @click="handleStopRecording">
-                        <el-icon style="margin-right: 5px;">
-                            <VideoPause />
-                        </el-icon>
-                        停止录制
-                    </el-button>
-                    <el-button size="small" @click="showVideoManagerDialog = true">
-                        <el-icon style="margin-right: 5px;">
-                            <FolderOpened />
-                        </el-icon>
-                        视频管理
-                    </el-button>
-                </el-button-group>
-            </div>
-        </div>
-        <div class="image-container">
-            <canvas ref="imageCanvas" class="image-canvas"></canvas>
-            <div v-if="!currentImage" class="no-image">
-                <span>{{ selectedImageTopic ? '等待图像数据...' : '请选择摄像头' }}</span>
-            </div>
-            <div v-if="isRecording" class="recording-indicator">
-                <span class="recording-dot"></span>
-                <span>录制中... {{ recordingTime }}</span>
-            </div>
-        </div>
-
-        <!-- 录制设置对话框 -->
-        <el-dialog v-model="showRecordingDialog" title="录制设置" width="400px">
-            <el-form :model="recordingSettings" label-width="120px">
-                <el-form-item label="录制模式">
-                    <el-radio-group v-model="recordingSettings.mode">
-                        <el-radio label="continuous">持续录制</el-radio>
-                        <el-radio label="segmented">分段录制</el-radio>
-                    </el-radio-group>
-                </el-form-item>
-                <el-form-item v-if="recordingSettings.mode === 'segmented'" label="分段时长（分钟）">
-                    <el-input-number v-model="recordingSettings.segmentMinutes" :min="1" :max="60" />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="showRecordingDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmStartRecording">确认</el-button>
-            </template>
-        </el-dialog>
-
-        <!-- 视频管理对话框 -->
-        <el-dialog v-model="showVideoManagerDialog" title="视频管理" width="800px" @open="loadVideoList">
-            <el-table :data="videoList" style="width: 100%" max-height="400">
-                <el-table-column prop="name" label="文件名" width="300" />
-                <el-table-column prop="size" label="大小" width="120">
-                    <template #default="{ row }">
-                        {{ typeof row.size === 'number' ? (row.size / 1024 / 1024).toFixed(2) + ' MB' : row.size }}
-                    </template>
-                </el-table-column>
-                <el-table-column prop="modified" label="修改时间" width="180">
-                    <template #default="{ row }">
-                        {{ typeof row.modified === 'number' ? new Date(row.modified * 1000).toLocaleString() : row.modified }}
-                    </template>
-                </el-table-column>
-                <el-table-column label="操作" width="200" fixed="right">
-                    <template #default="{ row }">
-                        <el-button size="small" @click="handleRenameVideo(row)">重命名</el-button>
-                        <el-button size="small" type="primary" @click="handleDownloadVideo(row)">下载</el-button>
-                        <el-button size="small" type="danger" @click="handleDeleteVideo(row)">删除</el-button>
-                    </template>
-                </el-table-column>
-            </el-table>
-        </el-dialog>
-
-        <!-- 重命名对话框 -->
-        <el-dialog v-model="showRenameDialog" title="重命名视频" width="400px">
-            <el-form>
-                <el-form-item label="新文件名">
-                    <el-input v-model="renameNewName" />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="showRenameDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmRenameVideo">确认</el-button>
-            </template>
-        </el-dialog>
+  <div class="image-viewer">
+    <div class="viewer-header">
+      <h3>图像显示</h3>
+      <div class="header-controls">
+        <el-select
+          v-model="selectedImageTopic"
+          placeholder="选择摄像头"
+          size="small"
+          style="width: 200px"
+          @change="handleTopicChange"
+        >
+          <el-option
+            v-for="topic in imageTopics"
+            :key="topic.name"
+            :label="topic.name"
+            :value="topic.name"
+          />
+        </el-select>
+        <el-button-group style="margin-left: 10px;">
+          <el-button
+            v-if="!isRecording"
+            type="danger"
+            size="small"
+            @click="handleStartRecording"
+          >
+            <el-icon style="margin-right: 5px;">
+              <VideoCamera />
+            </el-icon>
+            开始录制
+          </el-button>
+          <el-button
+            v-else
+            type="success"
+            size="small"
+            @click="handleStopRecording"
+          >
+            <el-icon style="margin-right: 5px;">
+              <VideoPause />
+            </el-icon>
+            停止录制
+          </el-button>
+          <el-button
+            size="small"
+            @click="showVideoManagerDialog = true"
+          >
+            <el-icon style="margin-right: 5px;">
+              <FolderOpened />
+            </el-icon>
+            视频管理
+          </el-button>
+        </el-button-group>
+      </div>
     </div>
+    <div class="image-container">
+      <canvas
+        ref="imageCanvas"
+        class="image-canvas"
+      />
+      <div
+        v-if="!currentImage"
+        class="no-image"
+      >
+        <span>{{ selectedImageTopic ? '等待图像数据...' : '请选择摄像头' }}</span>
+      </div>
+      <div
+        v-if="isRecording"
+        class="recording-indicator"
+      >
+        <span class="recording-dot" />
+        <span>录制中... {{ recordingTime }}</span>
+      </div>
+    </div>
+
+    <!-- 录制设置对话框 -->
+    <el-dialog
+      v-model="showRecordingDialog"
+      title="录制设置"
+      width="400px"
+    >
+      <el-form
+        :model="recordingSettings"
+        label-width="120px"
+      >
+        <el-form-item label="录制模式">
+          <el-radio-group v-model="recordingSettings.mode">
+            <el-radio label="continuous">
+              持续录制
+            </el-radio>
+            <el-radio label="segmented">
+              分段录制
+            </el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item
+          v-if="recordingSettings.mode === 'segmented'"
+          label="分段时长（分钟）"
+        >
+          <el-input-number
+            v-model="recordingSettings.segmentMinutes"
+            :min="1"
+            :max="60"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRecordingDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="confirmStartRecording"
+        >
+          确认
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 视频管理对话框 -->
+    <el-dialog
+      v-model="showVideoManagerDialog"
+      title="视频管理"
+      width="800px"
+      @open="loadVideoList"
+    >
+      <el-table
+        :data="videoList"
+        style="width: 100%"
+        max-height="400"
+      >
+        <el-table-column
+          prop="name"
+          label="文件名"
+          width="300"
+        />
+        <el-table-column
+          prop="size"
+          label="大小"
+          width="120"
+        >
+          <template #default="{ row }">
+            {{ typeof row.size === 'number' ? (row.size / 1024 / 1024).toFixed(2) + ' MB' : row.size }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="modified"
+          label="修改时间"
+          width="180"
+        >
+          <template #default="{ row }">
+            {{ typeof row.modified === 'number' ? new Date(row.modified * 1000).toLocaleString() : row.modified }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="操作"
+          width="200"
+          fixed="right"
+        >
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              @click="handleRenameVideo(row)"
+            >
+              重命名
+            </el-button>
+            <el-button
+              size="small"
+              type="primary"
+              @click="handleDownloadVideo(row)"
+            >
+              下载
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              @click="handleDeleteVideo(row)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <!-- 重命名对话框 -->
+    <el-dialog
+      v-model="showRenameDialog"
+      title="重命名视频"
+      width="400px"
+    >
+      <el-form>
+        <el-form-item label="新文件名">
+          <el-input v-model="renameNewName" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRenameDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="confirmRenameVideo"
+        >
+          确认
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup lang="ts">

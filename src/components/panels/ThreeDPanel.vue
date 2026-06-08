@@ -1,14 +1,21 @@
 <template>
-    <div class="three-d-panel">
-        <div ref="canvasContainer" class="canvas-container"></div>
-        <div class="map-controls">
-            <el-button size="small" @click="fitMapToView" title="适应地图">
-                <el-icon>
-                    <FullScreen />
-                </el-icon>
-            </el-button>
-        </div>
+  <div class="three-d-panel">
+    <div
+      ref="canvasContainer"
+      class="canvas-container"
+    />
+    <div class="map-controls">
+      <el-button
+        size="small"
+        title="适应地图"
+        @click="fitMapToView"
+      >
+        <el-icon>
+          <FullScreen />
+        </el-icon>
+      </el-button>
     </div>
+  </div>
 </template>
 
 <script setup lang="ts">

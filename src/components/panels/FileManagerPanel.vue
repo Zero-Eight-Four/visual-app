@@ -1,149 +1,274 @@
 <template>
-    <div class="file-manager-panel">
-        <div class="file-manager-content">
-            <!-- 路径导航 -->
-            <div class="path-navigation">
-                <el-input v-model="currentPath" placeholder="输入路径" @keyup.enter="navigateToPath">
-                    <template #prepend>
-                        <el-icon>
-                            <Folder />
-                        </el-icon>
-                    </template>
-                    <template #append>
-                        <el-button :icon="Search" @click="navigateToPath" />
-                    </template>
-                </el-input>
-                <div class="path-breadcrumb">
-                    <el-breadcrumb separator="/">
-                        <el-breadcrumb-item v-for="(part, index) in pathParts" :key="index">
-                            <a @click="navigateToBreadcrumb(index)">{{ part || '/' }}</a>
-                        </el-breadcrumb-item>
-                    </el-breadcrumb>
-                </div>
-            </div>
-
-            <!-- 工具栏 -->
-            <div class="toolbar">
-                <div class="toolbar-left">
-                    <el-button-group>
-                        <el-button :icon="Refresh" @click="refreshDirectory" :disabled="!isConnected || loading">
-                            刷新
-                        </el-button>
-                        <el-button :icon="Upload" @click="showUploadDialog = true" :disabled="!isConnected">
-                            上传
-                        </el-button>
-                        <el-button :icon="FolderAdd" @click="showCreateDirDialog = true" :disabled="!isConnected">
-                            新建文件夹
-                        </el-button>
-                    </el-button-group>
-                </div>
-            </div>
-
-            <!-- 文件列表 -->
-            <div class="file-list-container">
-                <el-scrollbar v-if="loading" class="loading-container">
-                    <div class="loading-content">
-                        <el-icon class="is-loading" :size="24">
-                            <Loading />
-                        </el-icon>
-                        <span>加载中...</span>
-                    </div>
-                </el-scrollbar>
-                <el-scrollbar v-else-if="files.length === 0" class="empty-container">
-                    <div class="empty-content">
-                        <el-icon :size="48" color="#ccc">
-                            <FolderOpened />
-                        </el-icon>
-                        <p>目录为空</p>
-                    </div>
-                </el-scrollbar>
-                <el-scrollbar v-else class="file-list">
-                    <div class="file-item" v-for="item in files" :key="item.path"
-                        :class="{ selected: selectedFiles.includes(item.path) }" @click="toggleSelect(item)"
-                        @dblclick="handleItemDoubleClick(item)">
-                        <el-icon class="file-icon" :size="24">
-                            <Folder v-if="item.type === 'directory'" />
-                            <Document v-else />
-                        </el-icon>
-                        <span class="file-name">{{ item.name }}</span>
-                        <span v-if="item.type === 'file' && item.size" class="file-size">
-                            {{ formatFileSize(item.size) }}
-                        </span>
-                        <div class="file-actions" @click.stop>
-                            <el-button-group size="small">
-                                <el-button :icon="Download" @click="handleDownload(item)" :disabled="item.type === 'directory'"
-                                    title="下载" />
-                                <el-button :icon="Delete" @click="handleDelete(item)" title="删除" />
-                                <el-button :icon="CopyDocument" @click="handleCopy(item)" title="复制" />
-                                <el-button :icon="Document" @click="handleMove(item)" title="移动" />
-                            </el-button-group>
-                        </div>
-                    </div>
-                </el-scrollbar>
-            </div>
+  <div class="file-manager-panel">
+    <div class="file-manager-content">
+      <!-- 路径导航 -->
+      <div class="path-navigation">
+        <el-input
+          v-model="currentPath"
+          placeholder="输入路径"
+          @keyup.enter="navigateToPath"
+        >
+          <template #prepend>
+            <el-icon>
+              <Folder />
+            </el-icon>
+          </template>
+          <template #append>
+            <el-button
+              :icon="Search"
+              @click="navigateToPath"
+            />
+          </template>
+        </el-input>
+        <div class="path-breadcrumb">
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item
+              v-for="(part, index) in pathParts"
+              :key="index"
+            >
+              <a @click="navigateToBreadcrumb(index)">{{ part || '/' }}</a>
+            </el-breadcrumb-item>
+          </el-breadcrumb>
         </div>
+      </div>
 
-        <!-- 上传对话框 -->
-        <el-dialog v-model="showUploadDialog" title="上传文件" width="500px" :close-on-click-modal="false">
-            <div class="upload-dialog-content">
-                <el-upload :auto-upload="false" :on-change="handleFileChange" :limit="1"
-                    drag>
-                    <el-icon class="el-icon--upload" :size="67">
-                        <UploadFilled />
-                    </el-icon>
-                    <div class="el-upload__text">
-                        将文件拖到此处，或<em>点击上传</em>
-                    </div>
-                    <template #tip>
-                        <div class="el-upload__tip">
-                            支持任意文件类型
-                        </div>
-                    </template>
-                </el-upload>
-                <div v-if="selectedFile" class="selected-file-info">
-                    <el-icon>
-                        <Document />
-                    </el-icon>
-                    <span>{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})</span>
-                </div>
-                <el-input v-model="uploadDestinationPath" placeholder="目标目录路径" style="margin-top: 16px;">
-                    <template #prepend>目标路径</template>
-                </el-input>
+      <!-- 工具栏 -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <el-button-group>
+            <el-button
+              :icon="Refresh"
+              :disabled="!isConnected || loading"
+              @click="refreshDirectory"
+            >
+              刷新
+            </el-button>
+            <el-button
+              :icon="Upload"
+              :disabled="!isConnected"
+              @click="showUploadDialog = true"
+            >
+              上传
+            </el-button>
+            <el-button
+              :icon="FolderAdd"
+              :disabled="!isConnected"
+              @click="showCreateDirDialog = true"
+            >
+              新建文件夹
+            </el-button>
+          </el-button-group>
+        </div>
+      </div>
+
+      <!-- 文件列表 -->
+      <div class="file-list-container">
+        <el-scrollbar
+          v-if="loading"
+          class="loading-container"
+        >
+          <div class="loading-content">
+            <el-icon
+              class="is-loading"
+              :size="24"
+            >
+              <Loading />
+            </el-icon>
+            <span>加载中...</span>
+          </div>
+        </el-scrollbar>
+        <el-scrollbar
+          v-else-if="files.length === 0"
+          class="empty-container"
+        >
+          <div class="empty-content">
+            <el-icon
+              :size="48"
+              color="#ccc"
+            >
+              <FolderOpened />
+            </el-icon>
+            <p>目录为空</p>
+          </div>
+        </el-scrollbar>
+        <el-scrollbar
+          v-else
+          class="file-list"
+        >
+          <div
+            v-for="item in files"
+            :key="item.path"
+            class="file-item"
+            :class="{ selected: selectedFiles.includes(item.path) }"
+            @click="toggleSelect(item)"
+            @dblclick="handleItemDoubleClick(item)"
+          >
+            <el-icon
+              class="file-icon"
+              :size="24"
+            >
+              <Folder v-if="item.type === 'directory'" />
+              <Document v-else />
+            </el-icon>
+            <span class="file-name">{{ item.name }}</span>
+            <span
+              v-if="item.type === 'file' && item.size"
+              class="file-size"
+            >
+              {{ formatFileSize(item.size) }}
+            </span>
+            <div
+              class="file-actions"
+              @click.stop
+            >
+              <el-button-group size="small">
+                <el-button
+                  :icon="Download"
+                  :disabled="item.type === 'directory'"
+                  title="下载"
+                  @click="handleDownload(item)"
+                />
+                <el-button
+                  :icon="Delete"
+                  title="删除"
+                  @click="handleDelete(item)"
+                />
+                <el-button
+                  :icon="CopyDocument"
+                  title="复制"
+                  @click="handleCopy(item)"
+                />
+                <el-button
+                  :icon="Document"
+                  title="移动"
+                  @click="handleMove(item)"
+                />
+              </el-button-group>
             </div>
-            <template #footer>
-                <el-button @click="showUploadDialog = false">取消</el-button>
-                <el-button type="primary" @click="handleUpload" :disabled="!selectedFile || uploading">
-                    {{ uploading ? '上传中...' : '上传' }}
-                </el-button>
-            </template>
-        </el-dialog>
-
-        <!-- 创建目录对话框 -->
-        <el-dialog v-model="showCreateDirDialog" title="新建文件夹" width="400px">
-            <el-input v-model="newDirName" placeholder="输入文件夹名称" @keyup.enter="handleCreateDirectory">
-                <template #prepend>名称</template>
-            </el-input>
-            <template #footer>
-                <el-button @click="showCreateDirDialog = false">取消</el-button>
-                <el-button type="primary" @click="handleCreateDirectory" :disabled="!newDirName.trim()">
-                    创建
-                </el-button>
-            </template>
-        </el-dialog>
-
-        <!-- 移动/复制对话框 -->
-        <el-dialog v-model="showMoveDialog" title="移动文件" width="400px">
-            <el-input v-model="moveDestinationPath" placeholder="输入目标路径">
-                <template #prepend>目标路径</template>
-            </el-input>
-            <template #footer>
-                <el-button @click="showMoveDialog = false">取消</el-button>
-                <el-button type="primary" @click="confirmMove" :disabled="!moveDestinationPath.trim()">
-                    确定
-                </el-button>
-            </template>
-        </el-dialog>
+          </div>
+        </el-scrollbar>
+      </div>
     </div>
+
+    <!-- 上传对话框 -->
+    <el-dialog
+      v-model="showUploadDialog"
+      title="上传文件"
+      width="500px"
+      :close-on-click-modal="false"
+    >
+      <div class="upload-dialog-content">
+        <el-upload
+          :auto-upload="false"
+          :on-change="handleFileChange"
+          :limit="1"
+          drag
+        >
+          <el-icon
+            class="el-icon--upload"
+            :size="67"
+          >
+            <UploadFilled />
+          </el-icon>
+          <div class="el-upload__text">
+            将文件拖到此处，或<em>点击上传</em>
+          </div>
+          <template #tip>
+            <div class="el-upload__tip">
+              支持任意文件类型
+            </div>
+          </template>
+        </el-upload>
+        <div
+          v-if="selectedFile"
+          class="selected-file-info"
+        >
+          <el-icon>
+            <Document />
+          </el-icon>
+          <span>{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})</span>
+        </div>
+        <el-input
+          v-model="uploadDestinationPath"
+          placeholder="目标目录路径"
+          style="margin-top: 16px;"
+        >
+          <template #prepend>
+            目标路径
+          </template>
+        </el-input>
+      </div>
+      <template #footer>
+        <el-button @click="showUploadDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!selectedFile || uploading"
+          @click="handleUpload"
+        >
+          {{ uploading ? '上传中...' : '上传' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 创建目录对话框 -->
+    <el-dialog
+      v-model="showCreateDirDialog"
+      title="新建文件夹"
+      width="400px"
+    >
+      <el-input
+        v-model="newDirName"
+        placeholder="输入文件夹名称"
+        @keyup.enter="handleCreateDirectory"
+      >
+        <template #prepend>
+          名称
+        </template>
+      </el-input>
+      <template #footer>
+        <el-button @click="showCreateDirDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!newDirName.trim()"
+          @click="handleCreateDirectory"
+        >
+          创建
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 移动/复制对话框 -->
+    <el-dialog
+      v-model="showMoveDialog"
+      title="移动文件"
+      width="400px"
+    >
+      <el-input
+        v-model="moveDestinationPath"
+        placeholder="输入目标路径"
+      >
+        <template #prepend>
+          目标路径
+        </template>
+      </el-input>
+      <template #footer>
+        <el-button @click="showMoveDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!moveDestinationPath.trim()"
+          @click="confirmMove"
+        >
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup lang="ts">

@@ -1,13 +1,21 @@
 <template>
-    <div class="viewer-container">
-        <div class="viewer-header">
-            <h3>3D场景</h3>
-            <div class="controls">
-                <el-button size="small" @click="resetCamera">重置视角</el-button>
-            </div>
-        </div>
-        <div ref="canvasContainer" class="canvas-container"></div>
+  <div class="viewer-container">
+    <div class="viewer-header">
+      <h3>3D场景</h3>
+      <div class="controls">
+        <el-button
+          size="small"
+          @click="resetCamera"
+        >
+          重置视角
+        </el-button>
+      </div>
     </div>
+    <div
+      ref="canvasContainer"
+      class="canvas-container"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">

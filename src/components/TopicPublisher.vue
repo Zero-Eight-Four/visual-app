@@ -1,47 +1,74 @@
 <template>
-    <div class="topic-publisher">
-        <div class="publisher-header">
-            <h3>话题发布</h3>
-        </div>
-        <div class="publisher-content">
-            <el-scrollbar height="100%">
-                <div class="form-section">
-                    <el-form :model="publishForm" label-width="80px" size="small">
-                        <el-form-item label="话题名称">
-                            <el-input v-model="publishForm.topic" placeholder="/example_topic" />
-                        </el-form-item>
-
-                        <el-form-item label="消息类型">
-                            <el-input v-model="publishForm.messageType" placeholder="std_msgs/String" />
-                        </el-form-item>
-
-                        <el-form-item label="消息内容">
-                            <el-input v-model="publishForm.message" type="textarea" :rows="8"
-                                placeholder='{"data": "Hello ROS"}' />
-                        </el-form-item>
-
-                        <el-form-item>
-                            <el-button type="primary" @click="handlePublish" :disabled="!canPublish"
-                                style="width: 100%">
-                                发布消息
-                            </el-button>
-                        </el-form-item>
-                    </el-form>
-                </div>
-
-                <div v-if="publishHistory.length > 0" class="history-section">
-                    <h4>发布历史</h4>
-                    <div v-for="(item, index) in publishHistory" :key="index" class="history-item">
-                        <div class="history-header">
-                            <span class="topic-name">{{ item.topic }}</span>
-                            <span class="timestamp">{{ item.timestamp }}</span>
-                        </div>
-                        <div class="message-preview">{{ item.messagePreview }}</div>
-                    </div>
-                </div>
-            </el-scrollbar>
-        </div>
+  <div class="topic-publisher">
+    <div class="publisher-header">
+      <h3>话题发布</h3>
     </div>
+    <div class="publisher-content">
+      <el-scrollbar height="100%">
+        <div class="form-section">
+          <el-form
+            :model="publishForm"
+            label-width="80px"
+            size="small"
+          >
+            <el-form-item label="话题名称">
+              <el-input
+                v-model="publishForm.topic"
+                placeholder="/example_topic"
+              />
+            </el-form-item>
+
+            <el-form-item label="消息类型">
+              <el-input
+                v-model="publishForm.messageType"
+                placeholder="std_msgs/String"
+              />
+            </el-form-item>
+
+            <el-form-item label="消息内容">
+              <el-input
+                v-model="publishForm.message"
+                type="textarea"
+                :rows="8"
+                placeholder="{&quot;data&quot;: &quot;Hello ROS&quot;}"
+              />
+            </el-form-item>
+
+            <el-form-item>
+              <el-button
+                type="primary"
+                :disabled="!canPublish"
+                style="width: 100%"
+                @click="handlePublish"
+              >
+                发布消息
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+
+        <div
+          v-if="publishHistory.length > 0"
+          class="history-section"
+        >
+          <h4>发布历史</h4>
+          <div
+            v-for="(item, index) in publishHistory"
+            :key="index"
+            class="history-item"
+          >
+            <div class="history-header">
+              <span class="topic-name">{{ item.topic }}</span>
+              <span class="timestamp">{{ item.timestamp }}</span>
+            </div>
+            <div class="message-preview">
+              {{ item.messagePreview }}
+            </div>
+          </div>
+        </div>
+      </el-scrollbar>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">

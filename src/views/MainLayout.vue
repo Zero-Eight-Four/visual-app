@@ -1,38 +1,40 @@
 <template>
-    <div class="main-layout">
-        <!-- Top Bar -->
-        <div class="top-bar">
-            <ConnectionStatus />
-            <div class="title">机器狗控制平台</div>
-            <TopicSelector />
-        </div>
-
-        <!-- Main Content Area -->
-        <div class="content-area">
-            <!-- Left Panel - 3D Visualization -->
-            <div class="panel panel-3d">
-                <ThreeDViewer />
-            </div>
-
-            <!-- Right Panel - Info and Controls -->
-            <div class="panel-group-right">
-                <!-- Image Display -->
-                <div class="panel panel-image">
-                    <ImageViewer />
-                </div>
-
-                <!-- State Info -->
-                <div class="panel panel-state">
-                    <StateInfo />
-                </div>
-
-                <!-- Topic Publisher -->
-                <div class="panel panel-publish">
-                    <TopicPublisher />
-                </div>
-            </div>
-        </div>
+  <div class="main-layout">
+    <!-- Top Bar -->
+    <div class="top-bar">
+      <ConnectionStatus />
+      <div class="title">
+        机器狗控制平台
+      </div>
+      <TopicSelector />
     </div>
+
+    <!-- Main Content Area -->
+    <div class="content-area">
+      <!-- Left Panel - 3D Visualization -->
+      <div class="panel panel-3d">
+        <ThreeDViewer />
+      </div>
+
+      <!-- Right Panel - Info and Controls -->
+      <div class="panel-group-right">
+        <!-- Image Display -->
+        <div class="panel panel-image">
+          <ImageViewer />
+        </div>
+
+        <!-- State Info -->
+        <div class="panel panel-state">
+          <StateInfo />
+        </div>
+
+        <!-- Topic Publisher -->
+        <div class="panel panel-publish">
+          <TopicPublisher />
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">

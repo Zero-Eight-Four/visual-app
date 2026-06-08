@@ -288,7 +288,7 @@ export default defineConfig({
             const mapsDir = MAPS_DIR
             let fileName = ''
             let fileData: Buffer | null = null
-            let folderName = fields.folderName || ''
+            const folderName = fields.folderName || ''
 
             // 查找文件
             for (const file of files) {

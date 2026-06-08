@@ -1,242 +1,380 @@
 <template>
-    <div class="robot-status-panel">
-        <div class="status-header">
-            <h3>状态</h3>
-            <template v-if="isConnected">
-                <el-tag type="success" size="small">
-                    已连接
-                </el-tag>
-                <el-button size="small" @click="handleDisconnect">
-                    切换
-                </el-button>
-                <el-button size="small" @click="openScheduleDialog">
-                    定时任务
-                </el-button>
-            </template>
-            <template v-else>
-                <el-button size="small" @click="openScheduleDialog">
-                    定时任务
-                </el-button>
-            </template>
-        </div>
+  <div class="robot-status-panel">
+    <div class="status-header">
+      <h3>状态</h3>
+      <template v-if="isConnected">
+        <el-tag
+          type="success"
+          size="small"
+        >
+          已连接
+        </el-tag>
+        <el-button
+          size="small"
+          @click="handleDisconnect"
+        >
+          切换
+        </el-button>
+        <el-button
+          size="small"
+          @click="openScheduleDialog"
+        >
+          定时任务
+        </el-button>
+      </template>
+      <template v-else>
+        <el-button
+          size="small"
+          @click="openScheduleDialog"
+        >
+          定时任务
+        </el-button>
+      </template>
+    </div>
 
-        <!-- 未连接时只显示连接提示 -->
-        <template v-if="!isConnected">
-            <div class="connect-prompt">
-                <div class="prompt-icon">
-                    🤖
-                </div>
-                <p>请先连接到机器狗</p>
-                <el-button type="primary" @click="showConnectionDialog = true">
-                    立即连接
-                </el-button>
+    <!-- 未连接时只显示连接提示 -->
+    <template v-if="!isConnected">
+      <div class="connect-prompt">
+        <div class="prompt-icon">
+          🤖
+        </div>
+        <p>请先连接到机器狗</p>
+        <el-button
+          type="primary"
+          @click="showConnectionDialog = true"
+        >
+          立即连接
+        </el-button>
+      </div>
+    </template>
+
+    <!-- 连接后显示状态信息 -->
+    <div
+      v-else
+      class="status-scroll-container"
+    >
+      <div class="status-content">
+        <template v-if="statusData">
+          <!-- 系统状态 -->
+          <div class="status-section">
+            <h4 class="section-title">
+              系统状态
+            </h4>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">状态:</span>
+                <span
+                  class="value"
+                  :class="statusData.motor_error_count ? 'error' : getSystemStatusClass(statusData.system_status)"
+                >
+                  {{ statusData.motor_error_count ? `${statusData.motor_error_count}个电机错误` :
+                    (statusData.system_status || 'N/A') }}
+                </span>
+              </div>
+              <div class="info-item">
+                <span class="label">主板温度:</span>
+                <span class="value">{{ (statusData.temp_ntc1 || 0).toFixed(0) }}°C</span>
+              </div>
             </div>
+          </div>
+
+          <!-- 运动状态 -->
+          <div class="status-section">
+            <h4 class="section-title">
+              运动状态
+            </h4>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">位置:</span>
+                <span class="value">
+                  ({{ (statusData.position_x || 0).toFixed(2) }},
+                  {{ (statusData.position_y || 0).toFixed(2) }})m
+                </span>
+              </div>
+              <div class="info-item">
+                <span class="label">速度:</span>
+                <span class="value">{{ getTotalVelocity() }} m/s</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 电池状态 -->
+          <div class="status-section">
+            <h4 class="section-title">
+              电池状态
+            </h4>
+            <div class="battery-info">
+              <el-progress
+                :percentage="batteryPercentage"
+                :color="batteryColor"
+                :stroke-width="20"
+              >
+                <span class="battery-text">{{ batteryPercentage }}%</span>
+              </el-progress>
+            </div>
+            <div
+              class="info-grid"
+              style="margin-top: 12px"
+            >
+              <div class="info-item">
+                <span class="label">模式:</span>
+                <span class="value">{{ getBatteryModeText(statusData.battery_mode) }}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">电池温度:</span>
+                <span class="value">{{ getBatteryAvgTemp() }}°C</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 电机状态 -->
+          <div
+            v-if="statusData.motor_hottest_name"
+            class="status-section"
+          >
+            <h4 class="section-title">
+              电机状态
+            </h4>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">最热:</span>
+                <span class="value">
+                  {{ getMotorNameText(statusData.motor_hottest_name) }}
+                  {{ (statusData.motor_hottest_temp || 0).toFixed(0) }}°C
+                </span>
+              </div>
+              <div class="info-item">
+                <span class="label">最冷:</span>
+                <span class="value">
+                  {{ getMotorNameText(statusData.motor_coolest_name) }}
+                  {{ (statusData.motor_coolest_temp || 0).toFixed(0) }}°C
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 足端力 -->
+          <div
+            v-if="statusData.foot_force_fr !== undefined"
+            class="status-section"
+          >
+            <h4 class="section-title">
+              足端力
+            </h4>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">右前:</span>
+                <span class="value">{{ getFootForceInKg(statusData.foot_force_fr) }}kg</span>
+              </div>
+              <div class="info-item">
+                <span class="label">左前:</span>
+                <span class="value">{{ getFootForceInKg(statusData.foot_force_fl) }}kg</span>
+              </div>
+              <div class="info-item">
+                <span class="label">右后:</span>
+                <span class="value">{{ getFootForceInKg(statusData.foot_force_rr) }}kg</span>
+              </div>
+              <div class="info-item">
+                <span class="label">左后:</span>
+                <span class="value">{{ getFootForceInKg(statusData.foot_force_rl) }}kg</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 更新时间 -->
+          <div class="status-footer">
+            <span class="update-time">更新时间: {{ lastUpdateTime }}</span>
+          </div>
         </template>
 
-        <!-- 连接后显示状态信息 -->
-        <div v-else class="status-scroll-container">
-            <div class="status-content">
-                <template v-if="statusData">
-                    <!-- 系统状态 -->
-                    <div class="status-section">
-                        <h4 class="section-title">
-                            系统状态
-                        </h4>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="label">状态:</span>
-                                <span class="value"
-                                    :class="statusData.motor_error_count ? 'error' : getSystemStatusClass(statusData.system_status)">
-                                    {{ statusData.motor_error_count ? `${statusData.motor_error_count}个电机错误` :
-                                        (statusData.system_status || 'N/A') }}
-                                </span>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">主板温度:</span>
-                                <span class="value">{{ (statusData.temp_ntc1 || 0).toFixed(0) }}°C</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 运动状态 -->
-                    <div class="status-section">
-                        <h4 class="section-title">
-                            运动状态
-                        </h4>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="label">位置:</span>
-                                <span class="value">
-                                    ({{ (statusData.position_x || 0).toFixed(2) }},
-                                    {{ (statusData.position_y || 0).toFixed(2) }})m
-                                </span>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">速度:</span>
-                                <span class="value">{{ getTotalVelocity() }} m/s</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 电池状态 -->
-                    <div class="status-section">
-                        <h4 class="section-title">
-                            电池状态
-                        </h4>
-                        <div class="battery-info">
-                            <el-progress :percentage="batteryPercentage" :color="batteryColor" :stroke-width="20">
-                                <span class="battery-text">{{ batteryPercentage }}%</span>
-                            </el-progress>
-                        </div>
-                        <div class="info-grid" style="margin-top: 12px">
-                            <div class="info-item">
-                                <span class="label">模式:</span>
-                                <span class="value">{{ getBatteryModeText(statusData.battery_mode) }}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">电池温度:</span>
-                                <span class="value">{{ getBatteryAvgTemp() }}°C</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 电机状态 -->
-                    <div class="status-section" v-if="statusData.motor_hottest_name">
-                        <h4 class="section-title">
-                            电机状态
-                        </h4>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="label">最热:</span>
-                                <span class="value">
-                                    {{ getMotorNameText(statusData.motor_hottest_name) }}
-                                    {{ (statusData.motor_hottest_temp || 0).toFixed(0) }}°C
-                                </span>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">最冷:</span>
-                                <span class="value">
-                                    {{ getMotorNameText(statusData.motor_coolest_name) }}
-                                    {{ (statusData.motor_coolest_temp || 0).toFixed(0) }}°C
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 足端力 -->
-                    <div class="status-section" v-if="statusData.foot_force_fr !== undefined">
-                        <h4 class="section-title">
-                            足端力
-                        </h4>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="label">右前:</span>
-                                <span class="value">{{ getFootForceInKg(statusData.foot_force_fr) }}kg</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">左前:</span>
-                                <span class="value">{{ getFootForceInKg(statusData.foot_force_fl) }}kg</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">右后:</span>
-                                <span class="value">{{ getFootForceInKg(statusData.foot_force_rr) }}kg</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">左后:</span>
-                                <span class="value">{{ getFootForceInKg(statusData.foot_force_rl) }}kg</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 更新时间 -->
-                    <div class="status-footer">
-                        <span class="update-time">更新时间: {{ lastUpdateTime }}</span>
-                    </div>
-                </template>
-
-                <template v-else>
-                    <el-empty description="暂无数据" :image-size="100">
-                        <template #image>
-                            <div style="font-size: 48px">
-                                🤖
-                            </div>
-                        </template>
-                    </el-empty>
-                </template>
-            </div>
-        </div>
-
-        <!-- Schedule Dialog -->
-        <el-dialog v-model="showScheduleDialog" title="定时任务管理" width="800px">
-            <div style="margin-bottom: 16px;">
-                <el-button type="primary" @click="handleAddSchedule">添加任务</el-button>
-            </div>
-            <el-table :data="schedules" style="width: 100%">
-                <el-table-column prop="name" label="任务名称" />
-                <el-table-column prop="robotName" label="机器狗名称" />
-                <el-table-column prop="robotIp" label="IP地址" />
-                <el-table-column label="重复">
-                    <template #default="{ row }">
-                        {{ formatDays(row.days) }}
-                    </template>
-                </el-table-column>
-                <el-table-column prop="time" label="时间" />
-                <el-table-column label="状态">
-                    <template #default="{ row }">
-                        <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
-                    </template>
-                </el-table-column>
-                <el-table-column label="操作" width="150">
-                    <template #default="{ row }">
-                        <el-button size="small" @click="handleEditSchedule(row)">编辑</el-button>
-                        <el-popconfirm title="确定删除吗？" @confirm="handleDeleteSchedule(row)">
-                            <template #reference>
-                                <el-button size="small" type="danger">删除</el-button>
-                            </template>
-                        </el-popconfirm>
-                    </template>
-                </el-table-column>
-            </el-table>
-        </el-dialog>
-
-        <!-- Edit Schedule Dialog -->
-        <el-dialog v-model="scheduleFormVisible" :title="isEditingSchedule ? '编辑任务' : '添加任务'" width="500px">
-            <el-form :model="scheduleForm" label-width="100px">
-                <el-form-item label="任务名称" required>
-                    <el-input v-model="scheduleForm.name" />
-                </el-form-item>
-                <el-form-item label="机器狗名称" required>
-                    <el-select v-model="scheduleForm.robotIp" placeholder="选择已保存的连接" filterable allow-create default-first-option @change="handleRobotSelectChange">
-                        <el-option v-for="robot in savedRobots" :key="robot.ip" :label="robot.name" :value="robot.ip" />
-                    </el-select>
-                </el-form-item>
-                <el-form-item label="重复日期" required>
-                    <el-checkbox-group v-model="scheduleForm.days">
-                        <el-checkbox :label="1">周一</el-checkbox>
-                        <el-checkbox :label="2">周二</el-checkbox>
-                        <el-checkbox :label="3">周三</el-checkbox>
-                        <el-checkbox :label="4">周四</el-checkbox>
-                        <el-checkbox :label="5">周五</el-checkbox>
-                        <el-checkbox :label="6">周六</el-checkbox>
-                        <el-checkbox :label="0">周日</el-checkbox>
-                    </el-checkbox-group>
-                </el-form-item>
-                <el-form-item label="启动时间" required>
-                    <el-time-picker v-model="scheduleForm.time" value-format="HH:mm" format="HH:mm" placeholder="选择时间" />
-                </el-form-item>
-                <el-form-item label="启用状态">
-                    <el-switch v-model="scheduleForm.enabled" />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="scheduleFormVisible = false">取消</el-button>
-                <el-button type="primary" @click="saveSchedule">保存</el-button>
+        <template v-else>
+          <el-empty
+            description="暂无数据"
+            :image-size="100"
+          >
+            <template #image>
+              <div style="font-size: 48px">
+                🤖
+              </div>
             </template>
-        </el-dialog>
-
-        <!-- Connection Dialog -->
-        <ConnectionDialog v-model="showConnectionDialog" @connected="onConnected" />
+          </el-empty>
+        </template>
+      </div>
     </div>
+
+    <!-- Schedule Dialog -->
+    <el-dialog
+      v-model="showScheduleDialog"
+      title="定时任务管理"
+      width="800px"
+    >
+      <div style="margin-bottom: 16px;">
+        <el-button
+          type="primary"
+          @click="handleAddSchedule"
+        >
+          添加任务
+        </el-button>
+      </div>
+      <el-table
+        :data="schedules"
+        style="width: 100%"
+      >
+        <el-table-column
+          prop="name"
+          label="任务名称"
+        />
+        <el-table-column
+          prop="robotName"
+          label="机器狗名称"
+        />
+        <el-table-column
+          prop="robotIp"
+          label="IP地址"
+        />
+        <el-table-column label="重复">
+          <template #default="{ row }">
+            {{ formatDays(row.days) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="time"
+          label="时间"
+        />
+        <el-table-column label="状态">
+          <template #default="{ row }">
+            <el-tag :type="row.enabled ? 'success' : 'info'">
+              {{ row.enabled ? '启用' : '禁用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="操作"
+          width="150"
+        >
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              @click="handleEditSchedule(row)"
+            >
+              编辑
+            </el-button>
+            <el-popconfirm
+              title="确定删除吗？"
+              @confirm="handleDeleteSchedule(row)"
+            >
+              <template #reference>
+                <el-button
+                  size="small"
+                  type="danger"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <!-- Edit Schedule Dialog -->
+    <el-dialog
+      v-model="scheduleFormVisible"
+      :title="isEditingSchedule ? '编辑任务' : '添加任务'"
+      width="500px"
+    >
+      <el-form
+        :model="scheduleForm"
+        label-width="100px"
+      >
+        <el-form-item
+          label="任务名称"
+          required
+        >
+          <el-input v-model="scheduleForm.name" />
+        </el-form-item>
+        <el-form-item
+          label="机器狗名称"
+          required
+        >
+          <el-select
+            v-model="scheduleForm.robotIp"
+            placeholder="选择已保存的连接"
+            filterable
+            allow-create
+            default-first-option
+            @change="handleRobotSelectChange"
+          >
+            <el-option
+              v-for="robot in savedRobots"
+              :key="robot.ip"
+              :label="robot.name"
+              :value="robot.ip"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item
+          label="重复日期"
+          required
+        >
+          <el-checkbox-group v-model="scheduleForm.days">
+            <el-checkbox :label="1">
+              周一
+            </el-checkbox>
+            <el-checkbox :label="2">
+              周二
+            </el-checkbox>
+            <el-checkbox :label="3">
+              周三
+            </el-checkbox>
+            <el-checkbox :label="4">
+              周四
+            </el-checkbox>
+            <el-checkbox :label="5">
+              周五
+            </el-checkbox>
+            <el-checkbox :label="6">
+              周六
+            </el-checkbox>
+            <el-checkbox :label="0">
+              周日
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-form-item
+          label="启动时间"
+          required
+        >
+          <el-time-picker
+            v-model="scheduleForm.time"
+            value-format="HH:mm"
+            format="HH:mm"
+            placeholder="选择时间"
+          />
+        </el-form-item>
+        <el-form-item label="启用状态">
+          <el-switch v-model="scheduleForm.enabled" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="scheduleFormVisible = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="saveSchedule"
+        >
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Connection Dialog -->
+    <ConnectionDialog
+      v-model="showConnectionDialog"
+      @connected="onConnected"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">

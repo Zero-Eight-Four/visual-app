@@ -1,78 +1,84 @@
 <template>
-    <div class="connection-status">
-        <el-tooltip
-            v-if="isConnected && rosStore.topicFetchError"
-            :content="`连接正常，但话题获取失败: ${rosStore.topicFetchError}`"
-            placement="bottom"
-        >
-            <div class="status-indicator connected-warning">
-                <span class="dot"></span>
-                <span class="text">已连接 (异常)</span>
-                <el-icon class="warning-icon"><Warning /></el-icon>
-            </div>
-        </el-tooltip>
-        <div v-else class="status-indicator" :class="statusClass">
-            <span class="dot"></span>
-            <span class="text">{{ statusText }}</span>
-        </div>
-        
-        <el-select 
-            v-model="selectedConnectionUrl" 
-            placeholder="选择连接" 
-            size="small" 
-            style="width: 200px;"
-            :disabled="isConnected || isConnecting"
-            @change="handleConnectionSelect"
-        >
-            <el-option
-                v-for="item in connectionHistory"
-                :key="item.url"
-                :label="item.name"
-                :value="item.url"
-            >
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span>{{ item.name }}</span>
-                    <span style="font-size: 11px; color: #999;">{{ item.url }}</span>
-                </div>
-            </el-option>
-        </el-select>
-        
-        <el-button 
-            type="primary" 
-            size="small" 
-            :icon="Plus"
-            @click="showConnectionDialog = true"
-            :disabled="isConnected || isConnecting"
-            plain
-        >
-            新增连接
-        </el-button>
-        
-        <el-button 
-            v-if="!isConnected" 
-            type="primary" 
-            size="small" 
-            @click="handleConnect" 
-            :loading="isConnecting"
-            :disabled="!selectedConnectionUrl"
-        >
-            {{ isConnecting ? '连接中...' : '连接' }}
-        </el-button>
-        <el-button 
-            v-else 
-            type="danger" 
-            size="small" 
-            @click="handleDisconnect"
-        >
-            断开
-        </el-button>
+  <div class="connection-status">
+    <el-tooltip
+      v-if="isConnected && rosStore.topicFetchError"
+      :content="`连接正常，但话题获取失败: ${rosStore.topicFetchError}`"
+      placement="bottom"
+    >
+      <div class="status-indicator connected-warning">
+        <span class="dot" />
+        <span class="text">已连接 (异常)</span>
+        <el-icon class="warning-icon">
+          <Warning />
+        </el-icon>
+      </div>
+    </el-tooltip>
+    <div
+      v-else
+      class="status-indicator"
+      :class="statusClass"
+    >
+      <span class="dot" />
+      <span class="text">{{ statusText }}</span>
     </div>
+        
+    <el-select 
+      v-model="selectedConnectionUrl" 
+      placeholder="选择连接" 
+      size="small" 
+      style="width: 200px;"
+      :disabled="isConnected || isConnecting"
+      @change="handleConnectionSelect"
+    >
+      <el-option
+        v-for="item in connectionHistory"
+        :key="item.url"
+        :label="item.name"
+        :value="item.url"
+      >
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>{{ item.name }}</span>
+          <span style="font-size: 11px; color: #999;">{{ item.url }}</span>
+        </div>
+      </el-option>
+    </el-select>
+        
+    <el-button 
+      type="primary" 
+      size="small" 
+      :icon="Plus"
+      :disabled="isConnected || isConnecting"
+      plain
+      @click="showConnectionDialog = true"
+    >
+      新增连接
+    </el-button>
+        
+    <el-button 
+      v-if="!isConnected" 
+      type="primary" 
+      size="small" 
+      :loading="isConnecting" 
+      :disabled="!selectedConnectionUrl"
+      @click="handleConnect"
+    >
+      {{ isConnecting ? '连接中...' : '连接' }}
+    </el-button>
+    <el-button 
+      v-else 
+      type="danger" 
+      size="small" 
+      @click="handleDisconnect"
+    >
+      断开
+    </el-button>
+  </div>
     
-    <!-- 连接对话框 -->
-    <ConnectionDialog 
-        v-model="showConnectionDialog" 
-        @connected="handleDialogConnected"
-    />
+  <!-- 连接对话框 -->
+  <ConnectionDialog 
+    v-model="showConnectionDialog" 
+    @connected="handleDialogConnected"
+  />
 </template>
 
 <script setup lang="ts">

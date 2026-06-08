@@ -1,146 +1,208 @@
 <template>
-    <div class="workspace">
-        <!-- Top App Bar -->
-        <div class="app-bar">
-            <div class="app-title">机器狗控制平台</div>
-        </div>
-
-        <!-- Main Content - New Layout -->
-        <div class="workspace-content">
-            <!-- Left Sidebar -->
-            <div class="left-sidebar">
-                <!-- Robot Status Panel -->
-                <div class="left-panel status-panel">
-                    <RobotStatusPanel />
-                </div>
-                <!-- Map Tools Panel -->
-                <div class="left-panel tools-panel">
-                    <div class="panel-header">
-                        <h3>地图工具</h3>
-                    </div>
-                    <div class="panel-content">
-                        <MapToolsPanel />
-                    </div>
-                </div>
-            </div>
-
-            <!-- Center Area -->
-            <div class="center-area">
-                <!-- 3D Panel (Full or Minimized) -->
-                <div class="center-panel threed-panel"
-                    :class="{ 'swap-to-corner': isImagePanelExpanded }" :style="threeDPanelStyle"
-                    @click="selectPanel('3d')">
-                    <div class="panel-header">
-                        <h3>任务规划</h3>
-                    </div>
-                    <div class="panel-content">
-                        <ThreeDPanel ref="threeDPanelRef" />
-                    </div>
-                </div>
-
-                <!-- Image Panel (Bottom Left Corner or Expanded) -->
-                <div class="floating-image-panel"
-                    :class="{ 'swap-to-full': isImagePanelExpanded }" @click="selectPanel('image')">
-                    <div class="panel-header">
-                        <h3>摄像头图像</h3>
-                    </div>
-                    <div class="panel-content">
-                        <ImagePanel ref="imagePanelRef" :isExpanded="isImagePanelExpanded" @toggleExpand="toggleImagePanelExpand" />
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right Sidebar -->
-            <div class="right-sidebar">
-                <!-- Settings Panel (Top) -->
-                <div class="right-panel settings-panel">
-                    <div class="panel-header">
-                        <h3>{{ currentSettingsTitle }}</h3>
-                    </div>
-                    <div class="panel-content">
-                        <keep-alive>
-                            <ImageSettings v-if="selectedPanel === 'image'" />
-                            <ThreeDSettings v-else-if="selectedPanel === '3d'" />
-                        </keep-alive>
-                        <div v-if="!selectedPanel" class="empty-settings">
-                            <p>点击左侧面板查看设置</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- AI Panel (Bottom) -->
-                <div class="right-panel ai-panel" @click="openAIDialog">
-                    <div class="panel-header">
-                        <h3>AI功能</h3>
-                    </div>
-                    <div class="panel-content ai-trigger">
-                        <el-icon :size="48" color="#409EFF">
-                            <DataAnalysis />
-                        </el-icon>
-                        <p>点击打开AI助手</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 断连警告弹窗 -->
-        <el-dialog v-model="disconnectWarningVisible" title="连接断开" width="400px" :close-on-click-modal="false"
-            :close-on-press-escape="false" :show-close="false">
-            <div class="disconnect-warning">
-                <el-icon :size="64" color="#F56C6C" style="margin-bottom: 16px;">
-                    <Connection />
-                </el-icon>
-                <h3 style="margin-bottom: 12px; color: #F56C6C;">机器狗连接已断开</h3>
-                <p style="color: #666; margin-bottom: 20px;">
-                    与机器狗的 WebSocket 连接已断开，请检查网络连接或机器狗状态。
-                </p>
-                <div class="disconnect-info">
-                    <p style="font-size: 12px; color: #999;">
-                        断开时间: {{ disconnectTime }}
-                    </p>
-                </div>
-            </div>
-            <template #footer>
-                <el-button @click="handleDisconnectConfirm" type="primary">确认</el-button>
-            </template>
-        </el-dialog>
-
-        <!-- 断连警告弹窗 -->
-        <el-dialog v-model="disconnectWarningVisible" title="连接断开" width="400px" :close-on-click-modal="false"
-            :close-on-press-escape="false" :show-close="false">
-            <div class="disconnect-warning">
-                <el-icon :size="64" color="#F56C6C" style="margin-bottom: 16px;">
-                    <Connection />
-                </el-icon>
-                <h3 style="margin-bottom: 12px; color: #F56C6C;">机器狗连接已断开</h3>
-                <p style="color: #666; margin-bottom: 20px;">
-                    与机器狗的连接已断开，请检查网络连接或机器狗状态。
-                </p>
-                <div class="disconnect-info">
-                    <p style="font-size: 12px; color: #999;">
-                        断开时间: {{ disconnectTime }}
-                    </p>
-                </div>
-            </div>
-            <template #footer>
-                <el-button @click="handleDisconnectConfirm" type="primary">确认</el-button>
-            </template>
-        </el-dialog>
-
-        <!-- AI Dialog -->
-        <el-dialog v-model="aiDialogVisible" title="AI助手" width="800px" :before-close="handleAIClose">
-            <div class="ai-dialog-content">
-                <div class="ai-feature-view">
-                    <div style="height: 600px;">
-                        <AIPanel initialTab="video" />
-                    </div>
-                </div>
-            </div>
-            <template #footer>
-                <el-button @click="aiDialogVisible = false">关闭</el-button>
-            </template>
-        </el-dialog>
+  <div class="workspace">
+    <!-- Top App Bar -->
+    <div class="app-bar">
+      <div class="app-title">
+        机器狗控制平台
+      </div>
     </div>
+
+    <!-- Main Content - New Layout -->
+    <div class="workspace-content">
+      <!-- Left Sidebar -->
+      <div class="left-sidebar">
+        <!-- Robot Status Panel -->
+        <div class="left-panel status-panel">
+          <RobotStatusPanel />
+        </div>
+        <!-- Map Tools Panel -->
+        <div class="left-panel tools-panel">
+          <div class="panel-header">
+            <h3>地图工具</h3>
+          </div>
+          <div class="panel-content">
+            <MapToolsPanel />
+          </div>
+        </div>
+      </div>
+
+      <!-- Center Area -->
+      <div class="center-area">
+        <!-- 3D Panel (Full or Minimized) -->
+        <div
+          class="center-panel threed-panel"
+          :class="{ 'swap-to-corner': isImagePanelExpanded }"
+          :style="threeDPanelStyle"
+          @click="selectPanel('3d')"
+        >
+          <div class="panel-header">
+            <h3>任务规划</h3>
+          </div>
+          <div class="panel-content">
+            <ThreeDPanel ref="threeDPanelRef" />
+          </div>
+        </div>
+
+        <!-- Image Panel (Bottom Left Corner or Expanded) -->
+        <div
+          class="floating-image-panel"
+          :class="{ 'swap-to-full': isImagePanelExpanded }"
+          @click="selectPanel('image')"
+        >
+          <div class="panel-header">
+            <h3>摄像头图像</h3>
+          </div>
+          <div class="panel-content">
+            <ImagePanel
+              ref="imagePanelRef"
+              :is-expanded="isImagePanelExpanded"
+              @toggle-expand="toggleImagePanelExpand"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Sidebar -->
+      <div class="right-sidebar">
+        <!-- Settings Panel (Top) -->
+        <div class="right-panel settings-panel">
+          <div class="panel-header">
+            <h3>{{ currentSettingsTitle }}</h3>
+          </div>
+          <div class="panel-content">
+            <keep-alive>
+              <ImageSettings v-if="selectedPanel === 'image'" />
+              <ThreeDSettings v-else-if="selectedPanel === '3d'" />
+            </keep-alive>
+            <div
+              v-if="!selectedPanel"
+              class="empty-settings"
+            >
+              <p>点击左侧面板查看设置</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Panel (Bottom) -->
+        <div
+          class="right-panel ai-panel"
+          @click="openAIDialog"
+        >
+          <div class="panel-header">
+            <h3>AI功能</h3>
+          </div>
+          <div class="panel-content ai-trigger">
+            <el-icon
+              :size="48"
+              color="#409EFF"
+            >
+              <DataAnalysis />
+            </el-icon>
+            <p>点击打开AI助手</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 断连警告弹窗 -->
+    <el-dialog
+      v-model="disconnectWarningVisible"
+      title="连接断开"
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+    >
+      <div class="disconnect-warning">
+        <el-icon
+          :size="64"
+          color="#F56C6C"
+          style="margin-bottom: 16px;"
+        >
+          <Connection />
+        </el-icon>
+        <h3 style="margin-bottom: 12px; color: #F56C6C;">
+          机器狗连接已断开
+        </h3>
+        <p style="color: #666; margin-bottom: 20px;">
+          与机器狗的 WebSocket 连接已断开，请检查网络连接或机器狗状态。
+        </p>
+        <div class="disconnect-info">
+          <p style="font-size: 12px; color: #999;">
+            断开时间: {{ disconnectTime }}
+          </p>
+        </div>
+      </div>
+      <template #footer>
+        <el-button
+          type="primary"
+          @click="handleDisconnectConfirm"
+        >
+          确认
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 断连警告弹窗 -->
+    <el-dialog
+      v-model="disconnectWarningVisible"
+      title="连接断开"
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+    >
+      <div class="disconnect-warning">
+        <el-icon
+          :size="64"
+          color="#F56C6C"
+          style="margin-bottom: 16px;"
+        >
+          <Connection />
+        </el-icon>
+        <h3 style="margin-bottom: 12px; color: #F56C6C;">
+          机器狗连接已断开
+        </h3>
+        <p style="color: #666; margin-bottom: 20px;">
+          与机器狗的连接已断开，请检查网络连接或机器狗状态。
+        </p>
+        <div class="disconnect-info">
+          <p style="font-size: 12px; color: #999;">
+            断开时间: {{ disconnectTime }}
+          </p>
+        </div>
+      </div>
+      <template #footer>
+        <el-button
+          type="primary"
+          @click="handleDisconnectConfirm"
+        >
+          确认
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- AI Dialog -->
+    <el-dialog
+      v-model="aiDialogVisible"
+      title="AI助手"
+      width="800px"
+      :before-close="handleAIClose"
+    >
+      <div class="ai-dialog-content">
+        <div class="ai-feature-view">
+          <div style="height: 600px;">
+            <AIPanel initial-tab="video" />
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="aiDialogVisible = false">
+          关闭
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup lang="ts">
