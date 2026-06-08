@@ -9,12 +9,12 @@ npm run build
 
 # 2. Build Backend Docker Image
 echo "Building Backend Docker Image..."
-sudo docker build -t visual-app-backend .
+echo 123 | sudo -S docker build -t visual-app-backend .
 
 # 3. Stop and Remove Existing Container
 echo "Stopping existing container..."
-sudo docker stop visual-backend || true
-sudo docker rm visual-backend || true
+echo 123 | sudo -S docker stop visual-backend || true
+echo 123 | sudo -S docker rm visual-backend || true
 
 # 4. Run New Container
 echo "Starting new container..."
@@ -35,9 +35,9 @@ fi
 
 # 确保子目录存在
 echo "Creating directories in OSS..."
-sudo mkdir -p "${OSS_PATH}/maps" "${OSS_PATH}/image" "${OSS_PATH}/videos"
+echo 123 | sudo -S mkdir -p "${OSS_PATH}/maps" "${OSS_PATH}/image" "${OSS_PATH}/videos"
 
-sudo docker run -d \
+echo 123 | sudo -S docker run -d \
   --name visual-backend \
   --restart always \
   -p 3000:3000 \

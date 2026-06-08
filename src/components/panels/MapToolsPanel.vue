@@ -2722,57 +2722,65 @@ const parsePGM = async (arrayBuffer: ArrayBuffer): Promise<ImageData | null> => 
             }
         }
 
-        // 读取头部文本（最多读取500字节）
-        let headerText = ''
+        // 解析头部代币 (Token): magic, width, height, maxVal
+        const tokens: string[] = []
+        let inComment = false
+        let currentToken = ''
         let headerEnd = startPos
-        let newlineCount = 0
 
-        for (let i = startPos; i < Math.min(startPos + 500, view.length); i++) {
+        for (let i = startPos; i < view.length; i++) {
             const char = view[i]
-            headerText += String.fromCharCode(char)
 
-            if (char === 0x0A) { // 换行符
-                newlineCount++
-                // 检查是否已经读取了3行（magic number, dimensions, max value）
-                if (newlineCount >= 3) {
-                    // 检查是否包含数字（表示max value行）
-                    const lines = headerText.split('\n')
-                    if (lines.length >= 3) {
-                        const lastLine = lines[lines.length - 2].trim()
-                        if (/^\d+$/.test(lastLine)) {
-                            headerEnd = i + 1
-                            break
-                        }
+            if (inComment) {
+                if (char === 0x0A || char === 0x0D) {
+                    inComment = false
+                }
+                continue
+            }
+
+            if (char === 0x23) { // '#'
+                inComment = true
+                if (currentToken.length > 0) {
+                    tokens.push(currentToken)
+                    currentToken = ''
+                    if (tokens.length >= 4) {
+                        headerEnd = i
+                        break
                     }
                 }
+                continue
+            }
+
+            // whitespace (space, tab, CR, LF)
+            if (char === 0x20 || char === 0x09 || char === 0x0A || char === 0x0D) {
+                if (currentToken.length > 0) {
+                    tokens.push(currentToken)
+                    currentToken = ''
+                    if (tokens.length >= 4) {
+                        // The PGM format requires exactly one whitespace character after the maxVal
+                        headerEnd = i + 1
+                        break
+                    }
+                }
+            } else {
+                currentToken += String.fromCharCode(char)
             }
         }
 
-        // 解析头部
-        const lines = headerText.split('\n')
-            .map(line => line.trim())
-            .filter(line => line && !line.startsWith('#'))
-
-        if (lines.length < 3) {
-            console.error('PGM头部解析失败，行数不足:', lines.length)
-            console.error('头部文本:', headerText.substring(0, 200))
-            throw new Error('无效的PGM文件头：行数不足')
+        if (tokens.length < 4) {
+            console.error('PGM头部解析失败，标记数不足:', tokens.length)
+            throw new Error('无效的PGM文件头：无法解析完整头部信息')
         }
 
-        const magic = lines[0]
+        const magic = tokens[0]
         if (magic !== 'P2' && magic !== 'P5') {
             console.error('不支持的PGM格式:', magic)
             throw new Error(`不支持的PGM格式: ${magic}，仅支持P2和P5格式`)
         }
 
-        const dimensions = lines[1].split(/\s+/).filter(s => s)
-        if (dimensions.length < 2) {
-            throw new Error('无效的PGM文件头：无法解析尺寸')
-        }
-
-        const width = parseInt(dimensions[0])
-        const height = parseInt(dimensions[1])
-        const maxVal = parseInt(lines[2])
+        const width = parseInt(tokens[1])
+        const height = parseInt(tokens[2])
+        const maxVal = parseInt(tokens[3])
 
         if (isNaN(width) || isNaN(height) || isNaN(maxVal)) {
             console.error('PGM头部数值解析失败:', { width, height, maxVal })
@@ -2782,7 +2790,6 @@ const parsePGM = async (arrayBuffer: ArrayBuffer): Promise<ImageData | null> => 
         if (width <= 0 || height <= 0 || maxVal <= 0) {
             throw new Error(`无效的PGM文件头：尺寸或最大值无效 (${width}x${height}, max=${maxVal})`)
         }
-
 
         // 创建ImageData
         const imageData = new ImageData(width, height)

@@ -1130,7 +1130,7 @@ const startMove = (direction: string) => {
         angular: { x: 0, y: 0, z: 0 }
     }
 
-    const speed = 0.5
+    const speed = 1.0
     const turnSpeed = 1.0
 
     switch (direction) {
@@ -1160,7 +1160,7 @@ const startMove = (direction: string) => {
     // 以 2Hz (500ms) 频率持续发送
     moveInterval.value = window.setInterval(() => {
         publishTwist(twist)
-    }, 500)
+    }, 100)
 }
 
 const stopMove = () => {

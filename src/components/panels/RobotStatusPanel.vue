@@ -56,7 +56,10 @@
       <div class="status-content">
         <template v-if="statusData">
           <!-- 系统状态 -->
-          <div class="status-section">
+          <div
+            v-if="statusData.robot_type !== 'genisom'"
+            class="status-section"
+          >
             <h4 class="section-title">
               系统状态
             </h4>
@@ -79,7 +82,10 @@
           </div>
 
           <!-- 运动状态 -->
-          <div class="status-section">
+          <div
+            v-if="statusData.robot_type !== 'genisom'"
+            class="status-section"
+          >
             <h4 class="section-title">
               运动状态
             </h4>
@@ -113,12 +119,13 @@
               </el-progress>
             </div>
             <div
+              v-if="statusData.robot_type !== 'genisom'"
               class="info-grid"
               style="margin-top: 12px"
             >
               <div class="info-item">
                 <span class="label">模式:</span>
-                <span class="value">{{ getBatteryModeText(statusData.battery_mode) }}</span>
+                <span class="value">{{ getBatteryModeDisplay() }}</span>
               </div>
               <div class="info-item">
                 <span class="label">电池温度:</span>
@@ -394,6 +401,7 @@ const rosStore = useRosStore()
 const showConnectionDialog = ref(false)
 
 interface RobotStatus {
+    robot_type?: string           // 机器人类型 ('go2' | 'genisom')
     // 电池信息
     battery_mode?: string          // 电池状态模式
     battery_soc?: number          // 电量百分比
@@ -430,6 +438,7 @@ interface RobotStatus {
     system_flags_detail?: string  // 系统标志详细描述
     temp_ntc1?: number           // 主板中心温度
     temp_ntc2?: number           // 自动充电温度
+    auto_charge_status?: string  // [System] Auto Charge 行文案，与状态串一致
 }
 
 const statusData = ref<RobotStatus | null>(null)
@@ -461,7 +470,7 @@ const getSystemStatusClass = (status?: string) => {
     return 'warning'
 }
 
-// 电池模式翻译
+// 电池模式翻译（原始 Mode: DCHG/CHG 等）
 const getBatteryModeText = (mode?: string) => {
     if (!mode) return 'N/A'
     const modeMap: Record<string, string> = {
@@ -472,6 +481,14 @@ const getBatteryModeText = (mode?: string) => {
         'charge': '充电中'
     }
     return modeMap[mode.toLowerCase()] || mode
+}
+
+// 面板上「模式」优先展示状态串中 Auto Charge 的说明，与固件输出一致
+const getBatteryModeDisplay = () => {
+    const s = statusData.value
+    if (!s) return 'N/A'
+    if (s.auto_charge_status) return s.auto_charge_status
+    return getBatteryModeText(s.battery_mode)
 }
 
 // 电机名称翻译
@@ -530,6 +547,7 @@ const subscribeToStatus = async () => {
         return
     }
 
+    // 订阅宇树机器狗状态
     try {
         await rosConnection.subscribe({
             topic: '/go2/status',
@@ -539,13 +557,39 @@ const subscribeToStatus = async () => {
             }
         })
     } catch (error) {
-        console.error('❌ 订阅状态话题失败:', error)
+        console.error('❌ 订阅/go2/status话题失败:', error)
+    }
+
+    // 订阅智身科技机器狗状态
+    try {
+        await rosConnection.subscribe({
+            topic: '/dog/status',
+            messageType: 'diagnostic_msgs/DiagnosticArray',
+            callback: (message: any) => {
+                handleDogStatusMessage(message)
+            }
+        })
+    } catch (error) {
+        console.error('❌ 订阅/dog/status话题失败:', error)
+    }
+
+    // 订阅 A2 状态
+    try {
+        await rosConnection.subscribe({
+            topic: '/a2/status',
+            messageType: 'std_msgs/String',
+            callback: (message: RosMessage) => {
+                handleStatusMessage(message)
+            }
+        })
+    } catch (error) {
+        console.error('❌ 订阅/a2/status话题失败:', error)
     }
 }
 
 // 解析字符串格式的状态数据（基于C++输出格式）
 const parseStatusString = (statusString: string): RobotStatus => {
-    const data: RobotStatus = {}
+    const data: RobotStatus = { robot_type: 'go2' }
     const lines = statusString.split('\n')
 
     for (let i = 0; i < lines.length; i++) {
@@ -632,6 +676,11 @@ const parseStatusString = (statusString: string): RobotStatus => {
             }
         }
 
+        if (line.includes('Auto Charge:')) {
+            const autoChargeMatch = line.match(/Auto Charge:\s*(.+)/)
+            if (autoChargeMatch) data.auto_charge_status = autoChargeMatch[1].trim()
+        }
+
         if (line.includes('Main Board Temp:')) {
             const tempMatch = line.match(/Main Board Temp:\s*([-\d]+)°C.*Charging Temp:\s*([-\d]+)°C/)
             if (tempMatch) {
@@ -642,6 +691,38 @@ const parseStatusString = (statusString: string): RobotStatus => {
     }
 
     return data
+}
+
+// 处理智身科技机器狗状态消息
+const handleDogStatusMessage = (message: any) => {
+    try {
+        if (!statusData.value) {
+            statusData.value = { robot_type: 'genisom' }
+        } else {
+            statusData.value.robot_type = 'genisom'
+        }
+        
+        if (message && message.status && Array.isArray(message.status)) {
+            const genisomStatus = message.status.find((s: any) => s.name === 'genisom_l1_bridge')
+            if (genisomStatus && Array.isArray(genisomStatus.values)) {
+                // 解析电量
+                const batteryVal = genisomStatus.values.find((v: any) => v.key === 'battery_percent')
+                if (batteryVal && batteryVal.value) {
+                    statusData.value.battery_soc = parseFloat(batteryVal.value)
+                    lastUpdateTime.value = new Date().toLocaleTimeString()
+                    rosStore.setRobotStatus(statusData.value)
+                }
+                
+                // 也可以解析电池状态、电压等（面板已有的绑定字段）
+                const bmsStatus = genisomStatus.values.find((v: any) => v.key === 'bms_status')
+                if (bmsStatus && bmsStatus.value) {
+                    statusData.value.battery_mode = bmsStatus.value === '1' ? 'chg' : 'dchg'
+                }
+            }
+        }
+    } catch (error) {
+        console.error('❌ 解析智身科技机器狗状态消息失败:', error, message)
+    }
 }
 
 // 温度保护状态
@@ -728,6 +809,8 @@ onMounted(() => {
 onUnmounted(() => {
     if (rosConnection.isConnected()) {
         rosConnection.unsubscribe('/go2/status')
+        rosConnection.unsubscribe('/dog/status')
+        rosConnection.unsubscribe('/a2/status')
     }
 })
 // Schedule Logic

@@ -1,0 +1,9 @@
+image/
+videos/
+maps/
+temp/
+node_modules/
+dist/
+.git/
+certs/
+deploy/

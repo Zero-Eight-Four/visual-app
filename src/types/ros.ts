@@ -64,6 +64,7 @@ export interface RobotStatus {
   velocity_z?: number
   battery_soc?: number
   battery_mode?: string
+  auto_charge_status?: string
   battery_temp_bat1?: number
   battery_temp_bat2?: number
   [key: string]: any

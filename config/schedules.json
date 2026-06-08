@@ -10,5 +10,27 @@
     "time": "16:54",
     "enabled": false,
     "lastTriggered": "5-16:51"
+  },
+  {
+    "name": "paper-test",
+    "robotName": "go2",
+    "robotIp": "8.148.247.53",
+    "days": [
+      4
+    ],
+    "time": "23:59",
+    "enabled": false,
+    "id": "1777538287425"
+  },
+  {
+    "name": "paper-test",
+    "robotName": "go2",
+    "robotIp": "8.148.247.53",
+    "days": [
+      4
+    ],
+    "time": "23:59",
+    "enabled": false,
+    "id": "1777538330330"
   }
 ]

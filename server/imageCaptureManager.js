@@ -1,4 +1,4 @@
-import { writeFile, mkdir, readdir, unlink } from 'fs/promises';
+import { writeFile, mkdir } from 'fs/promises';
 import { join, resolve } from 'path';
 import ROSLIB from 'roslib';
 
@@ -122,34 +122,9 @@ export class ImageCaptureManager {
                 await writeFile(filepath, buffer);
                 // console.log(`[ImageCaptureManager] Saved image ${filename}`);
 
-                // Manage file count
-                await this.manageImageCount(checkDir);
-
             } catch (error) {
                 console.error('[ImageCaptureManager] Error saving image:', error);
             }
         }, 5000);
-    }
-
-    async manageImageCount(dir) {
-        try {
-            const files = await readdir(dir);
-            // Filter for image files if necessary, or just assume all files in check/ are images
-            const imageFiles = files.filter(f => f.startsWith('img_'));
-
-            if (imageFiles.length > 100) {
-                // Sort by name (timestamp)
-                imageFiles.sort();
-
-                // Delete oldest
-                const filesToDelete = imageFiles.slice(0, imageFiles.length - 100);
-                for (const file of filesToDelete) {
-                    await unlink(join(dir, file));
-                    // console.log(`[ImageCaptureManager] Deleted old image ${file}`);
-                }
-            }
-        } catch (error) {
-            console.error('[ImageCaptureManager] Error managing image count:', error);
-        }
     }
 }
