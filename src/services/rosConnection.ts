@@ -8,6 +8,11 @@ import type { ConnectionConfig, RosMessage, TopicSubscription, RosTopic } from '
 // 使用动态导入避免构建时的类型问题
 let ROSLIB: any = null
 
+type SubscriberEntry = {
+  listener: any
+  callbacks: Map<string, (message: RosMessage) => void>
+}
+
 async function loadRoslib(retries = 3): Promise<any> {
   if (ROSLIB) {
     return ROSLIB
@@ -51,7 +56,7 @@ async function loadRoslib(retries = 3): Promise<any> {
 
 class RosConnection {
   private ros: any = null
-  private subscribers = new Map<string, any>()
+  private subscribers = new Map<string, SubscriberEntry>()
   private publishers = new Map<string, any>()
   private connectionCallbacks: ((connected: boolean) => void)[] = []
   private disconnectCallbacks: (() => void)[] = []
@@ -176,7 +181,7 @@ class RosConnection {
     this.stopHeartbeat()
     if (this.ros) {
       // 清理所有订阅
-      this.subscribers.forEach((sub) => sub.unsubscribe())
+      this.subscribers.forEach((entry) => entry.listener.unsubscribe())
       this.subscribers.clear()
 
       // 清理所有发布者
@@ -347,12 +352,66 @@ class RosConnection {
     }
 
     const lib = await loadRoslib()
+    const subscriptionKey = subscription.key || 'default'
+    let entry = this.subscribers.get(subscription.topic)
 
-    // 如果已存在订阅，先取消
-    if (this.subscribers.has(subscription.topic)) {
-      this.unsubscribe(subscription.topic)
+    if (!entry) {
+      const listener = new lib.Topic({
+        ros: this.ros,
+        name: subscription.topic,
+        messageType: subscription.messageType,
+        throttle_rate: subscription.throttleRate ?? 200,
+        queue_length: 1,
+        compression: subscription.compression || 'none'
+      })
+
+      entry = {
+        listener,
+        callbacks: new Map()
+      }
+
+      listener.subscribe((message: RosMessage) => {
+        entry?.callbacks.forEach((callback) => callback(message))
+      })
+
+      this.subscribers.set(subscription.topic, entry)
     }
 
+    entry.callbacks.set(subscriptionKey, subscription.callback)
+  }
+
+  /**
+   * 取消订阅话题
+   */
+  unsubscribe(topic: string, key?: string): void {
+    const entry = this.subscribers.get(topic)
+    if (!entry) return
+
+    if (key) {
+      entry.callbacks.delete(key)
+      if (entry.callbacks.size > 0) return
+    }
+
+    if (!key) {
+      entry.callbacks.clear()
+    }
+
+    if (entry.callbacks.size === 0) {
+      entry.listener.unsubscribe()
+      this.subscribers.delete(topic)
+    }
+  }
+
+  /**
+   * 创建独立调试订阅，不占用业务订阅表。
+   * 用于控制台调试面板同时监听话题，避免覆盖页面已有订阅。
+   */
+  async createDebugSubscription(subscription: TopicSubscription): Promise<() => void> {
+    if (!this.ros) {
+      throw new Error('Not connected to ROS')
+    }
+
+    const lib = await loadRoslib()
     const listener = new lib.Topic({
       ros: this.ros,
       name: subscription.topic,
@@ -366,17 +425,8 @@ class RosConnection {
       subscription.callback(message)
     })
 
-    this.subscribers.set(subscription.topic, listener)
-  }
-
-  /**
-   * 取消订阅话题
-   */
-  unsubscribe(topic: string): void {
-    const subscriber = this.subscribers.get(topic)
-    if (subscriber) {
-      subscriber.unsubscribe()
-      this.subscribers.delete(topic)
+    return () => {
+      listener.unsubscribe()
     }
   }
 

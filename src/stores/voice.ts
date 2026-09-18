@@ -1,15 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { rosConnection } from '@/services/rosConnection'
-import type { TTSReq, RecordAudioReq, DeviceControlReq, CommonResp, RecordAudioResp } from '@/types/ros'
+import type { DeviceControlReq, CommonResp } from '@/types/ros'
 import { ElMessage } from 'element-plus'
 
 export const useVoiceStore = defineStore('voice', () => {
   // State
   const lastTTSResp = ref<CommonResp | null>(null)
-  const lastRecordResp = ref<RecordAudioResp | null>(null)
   const lastDeviceControlResp = ref<CommonResp | null>(null)
   const logs = ref<string[]>([])
+  const subscriptionsReady = ref(false)
 
   // Actions
   function addLog(msg: string) {
@@ -18,7 +18,16 @@ export const useVoiceStore = defineStore('voice', () => {
     if (logs.value.length > 100) logs.value.pop()
   }
 
+  function markSubscriptionsPending() {
+    subscriptionsReady.value = false
+  }
+
   async function initSubscriptions() {
+    if (subscriptionsReady.value) {
+      addLog('语音话题订阅已就绪')
+      return
+    }
+
     try {
       await rosConnection.subscribe({
         topic: '/voice/tts_resp',
@@ -28,18 +37,6 @@ export const useVoiceStore = defineStore('voice', () => {
           addLog(`TTS响应: ${msg.success ? '成功' : '失败'} - ${msg.message}`)
           if (!msg.success) ElMessage.error(`TTS失败: ${msg.message}`)
           else ElMessage.success(`TTS成功: ${msg.message}`)
-        }
-      })
-
-      await rosConnection.subscribe({
-        topic: '/voice/record_audio_resp',
-        messageType: 'voice_chat_ros/RecordAudioResp',
-        callback: (msg: any) => {
-          lastRecordResp.value = msg
-          addLog(`录音响应: ${msg.success ? '成功' : '失败'} - ${msg.message}`)
-          if (msg.audio_file) addLog(`录音文件: ${msg.audio_file}`)
-          if (!msg.success) ElMessage.error(`录音失败: ${msg.message}`)
-          else ElMessage.success(`录音成功: ${msg.message}`)
         }
       })
 
@@ -55,32 +52,11 @@ export const useVoiceStore = defineStore('voice', () => {
         }
       })
 
+      subscriptionsReady.value = true
       addLog('已订阅语音交互相关话题')
     } catch (error) {
       console.error('Failed to subscribe to voice topics:', error)
       addLog(`订阅失败: ${error}`)
-    }
-  }
-
-  async function sendTTS(req: TTSReq) {
-    try {
-      await rosConnection.publish('/voice/tts_req', 'voice_chat_ros/TTSReq', req)
-      addLog(`发送TTS请求: "${req.text}" (音量: ${req.volume})`)
-    } catch (error) {
-      console.error('Failed to send TTS request:', error)
-      addLog(`发送TTS请求失败: ${error}`)
-      ElMessage.error('发送TTS请求失败')
-    }
-  }
-
-  async function sendRecordAudio(req: RecordAudioReq) {
-    try {
-      await rosConnection.publish('/voice/record_audio_req', 'voice_chat_ros/RecordAudioReq', req)
-      addLog(`发送录音请求: 时长 ${req.duration}秒`)
-    } catch (error) {
-      console.error('Failed to send record request:', error)
-      addLog(`发送录音请求失败: ${error}`)
-      ElMessage.error('发送录音请求失败')
     }
   }
 
@@ -92,6 +68,42 @@ export const useVoiceStore = defineStore('voice', () => {
       console.error('Failed to send device control request:', error)
       addLog(`发送设备控制请求失败: ${error}`)
       ElMessage.error('发送设备控制请求失败')
+    }
+  }
+
+  async function setVolume(volume: number) {
+    const normalizedVolume = Math.round(volume)
+
+    if (!Number.isFinite(normalizedVolume) || normalizedVolume < 0 || normalizedVolume > 100) {
+      ElMessage.warning('音量范围为 0-100')
+      return false
+    }
+
+    try {
+      const resp = await rosConnection.callService(
+        '/voice/device_control',
+        'voice_chat_ros/DeviceControl',
+        {
+          command: 'set_volume',
+          param1: '',
+          param2: '',
+          param_int: normalizedVolume,
+          param_bool: false
+        }
+      ) as CommonResp
+
+      lastDeviceControlResp.value = resp
+      addLog(`设置音量: ${normalizedVolume} - ${resp.success ? '成功' : '失败'}${resp.message ? ` - ${resp.message}` : ''}`)
+
+      if (resp.success) ElMessage.success(resp.message || `音量已设置为 ${normalizedVolume}`)
+      else ElMessage.error(resp.message || '设置音量失败')
+
+      return resp.success
+    } catch (error) {
+      console.error('Failed to set volume:', error)
+      addLog(`设置音量失败: ${error}`)
+      ElMessage.error('设置音量失败')
+      return false
     }
   }
 
@@ -118,13 +130,12 @@ export const useVoiceStore = defineStore('voice', () => {
     }
   }
 
-  async function bridgeTTS(text: string, voice: number, loop: boolean, volume: number) {
+  async function bridgeTTS(text: string, voice: number, loop: boolean) {
     try {
       // Set parameters
       await rosConnection.publish('/voice_device_bridge_node/tts_text', 'std_msgs/String', { data: text })
       await rosConnection.publish('/voice_device_bridge_node/tts_voice', 'std_msgs/UInt8', { data: voice })
       await rosConnection.publish('/voice_device_bridge_node/tts_loop', 'std_msgs/Bool', { data: loop })
-      await rosConnection.publish('/voice_device_bridge_node/tts_volume', 'std_msgs/UInt8', { data: volume })
 
       // Trigger TTS
       setTimeout(async () => {
@@ -148,19 +159,52 @@ export const useVoiceStore = defineStore('voice', () => {
     }
   }
 
+  async function bridgeReverbControl(enabled: boolean, mode: number, level: number, delay: number) {
+    try {
+      await rosConnection.publish('/voice_device_bridge_node/reverb_enabled', 'std_msgs/Bool', { data: enabled })
+      await rosConnection.publish('/voice_device_bridge_node/reverb_mode', 'std_msgs/UInt8', { data: mode })
+      await rosConnection.publish('/voice_device_bridge_node/reverb_level', 'std_msgs/UInt8', { data: level })
+      await rosConnection.publish('/voice_device_bridge_node/reverb_delay', 'std_msgs/UInt16', { data: delay })
+
+      setTimeout(async () => {
+        await rosConnection.publish('/voice_device_bridge_node/reverb_apply', 'std_msgs/Empty', {})
+      }, 100)
+
+      addLog(`发送语音控制: ${enabled ? '开启' : '关闭'}, 模式${mode}, 强度${level}, 延迟${delay}ms`)
+    } catch (error) {
+      console.error('Failed to control reverb:', error)
+      addLog(`语音控制失败: ${error}`)
+      ElMessage.error('语音控制失败')
+    }
+  }
+
+  async function bridgeReverbStop() {
+    try {
+      await rosConnection.publish('/voice_device_bridge_node/reverb_enabled', 'std_msgs/Bool', { data: false })
+      await rosConnection.publish('/voice_device_bridge_node/reverb_off', 'std_msgs/Empty', {})
+      addLog('发送关闭余音指令')
+    } catch (error) {
+      console.error('Failed to stop reverb:', error)
+      addLog(`关闭余音失败: ${error}`)
+      ElMessage.error('关闭余音失败')
+    }
+  }
+
   return {
     lastTTSResp,
-    lastRecordResp,
     lastDeviceControlResp,
     logs,
+    subscriptionsReady,
     initSubscriptions,
-    sendTTS,
-    sendRecordAudio,
+    markSubscriptionsPending,
     sendDeviceControl,
+    setVolume,
     addLog,
     bridgeLightControl,
     bridgeLightMode,
     bridgeTTS,
-    bridgeTTSStop
+    bridgeTTSStop,
+    bridgeReverbControl,
+    bridgeReverbStop
   }
 })

@@ -13,6 +13,8 @@ const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url))
 const MAPS_DIR = join(ROOT_DIR, 'maps')
 const VIDEOS_DIR = join(ROOT_DIR, 'videos')
 const TEMP_DIR = join(ROOT_DIR, 'temp')
+const TARGET_API = process.env.TARGET_API || 'http://127.0.0.1:8000'
+const SECONDARY_AI_API = process.env.SECONDARY_AI_API || 'http://8.148.247.53:8001'
 
 // 优化的流式处理：使用固定大小缓冲区，避免内存溢出
 // 对于大文件，使用流式写入临时文件，然后移动到目标位置
@@ -265,6 +267,15 @@ async function processMultipartStream(
 export default defineConfig({
   plugins: [
     vue(),
+    {
+      name: 'html-env-defaults',
+      transformIndexHtml(html) {
+        return html.replace(
+          /__VITE_APP_FAVICON__/g,
+          process.env.VITE_APP_FAVICON || 'favicon-placeholder.png'
+        )
+      }
+    },
     // 自定义插件：提供 /maps/ 目录列表和文件服务
     {
       name: 'maps-directory-listing',
@@ -1915,8 +1926,18 @@ export default defineConfig({
     port: 3000,
     host: true,
     proxy: {
+      '/api/ai-secondary-mirror': {
+        target: SECONDARY_AI_API,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/ai-secondary-mirror/, '/api')
+      },
+      '/api2': {
+        target: SECONDARY_AI_API,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api2/, '/api')
+      },
       '/api': {
-        target: 'https://ibl.zjypwy.com/cscec-robot-dog',
+        target: TARGET_API,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '/api')
       }

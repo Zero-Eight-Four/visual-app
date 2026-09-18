@@ -6,10 +6,11 @@ import { existsSync } from 'fs';
 const CONFIG_PATH = resolve(process.cwd(), 'config/schedules.json');
 
 export class ScheduleManager {
-    constructor(mapSender) {
+    constructor(mapSender, imageCaptureManager = null) {
         this.schedules = [];
         this.timer = null;
         this.mapSender = mapSender; // Function to send map to robot
+        this.imageCaptureManager = imageCaptureManager;
         this.isProcessing = false;
     }
 
@@ -176,6 +177,10 @@ export class ScheduleManager {
                 startQueueTopic.publish(new ROSLIB.Message({}));
                 console.log(`[ScheduleManager] Sent start command to /goal_queue/start`);
 
+                if (this.imageCaptureManager) {
+                    await this.imageCaptureManager.startImageCapture(robotIp);
+                }
+
                 // 4. Wait for Task Completion (Subscribe to /goal_queue/stop)
                 const stopQueueTopic = new ROSLIB.Topic({
                     ros: ros,
@@ -187,6 +192,9 @@ export class ScheduleManager {
 
                 const cleanup = () => {
                     if (taskTimeout) clearTimeout(taskTimeout);
+                    if (this.imageCaptureManager) {
+                        this.imageCaptureManager.stopImageCapture();
+                    }
                     try {
                         stopQueueTopic.unsubscribe();
                         ros.close();
@@ -224,6 +232,9 @@ export class ScheduleManager {
 
                         // Do NOT close connection, just stop listening and clear timeout
                         if (taskTimeout) clearTimeout(taskTimeout);
+                        if (this.imageCaptureManager) {
+                            this.imageCaptureManager.stopImageCapture();
+                        }
                         try {
                             stopQueueTopic.unsubscribe();
                         } catch (e) {

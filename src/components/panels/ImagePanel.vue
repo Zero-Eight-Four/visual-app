@@ -101,6 +101,8 @@ const retryFetchTopics = async () => {
 const defaultCameraTopics = [
     '/camera/image_raw/compressed',
     '/camera/image_raw',
+    '/camera/visible/image_raw/compressed',
+    '/camera/visible/image_raw',
     '/usb_cam/image_raw/compressed',
     '/usb_cam/image_raw',
     '/head_camera/rgb/image_raw/compressed',
@@ -325,161 +327,75 @@ const handleImageMessage = (message: RosMessage) => {
 
 // 自动选择并订阅默认摄像头话题
 // --- 自动采集与任务监听逻辑 ---
-// const isAutoCapturing = ref(false) // Replace with store state
 const isAutoCapturing = computed(() => rosStore.isAutoCapturing)
-let velocityTimer: ReturnType<typeof setInterval> | null = null
-let ptzTimer: ReturnType<typeof setTimeout> | null = null
+let captureSessionId = 0
 
-// 发布速度指令控制机器狗
-/*
-const publishVelocity = async (angularZ: number) => {
-    if (!rosConnection.isConnected()) return
-    try {
-        await rosConnection.publish('/cmd_vel', 'geometry_msgs/Twist', {
-            linear: { x: 0, y: 0, z: 0 },
-            angular: { x: 0, y: 0, z: angularZ }
-        })
-    } catch (error) {
-        console.error('Failed to publish velocity:', error)
-    }
-}
-*/
-
-// PTZ 控制相关
-const publishPtzCommand = async (command: string) => {
-    // 映射命令到新的话题 (根据 ImageSettings.vue 中的定义)
-    const topicMap: Record<string, string> = {
-        'rotate_up': '/camera_control/tilt_up',
-        'rotate_down': '/camera_control/tilt_down',
-        'rotate_left': '/camera_control/continuous_pan_left',
-        'rotate_right': '/camera_control/continuous_pan_right',
-        'zoom_in': '/camera_control/zoom_in',
-        'zoom_out': '/camera_control/zoom_out',
-        'center': '/camera_control/center',
-        'stop': '/camera_control/stop',
-        'spin_left': '/camera_control/continuous_pan_left',
-        'spin_right': '/camera_control/continuous_pan_right'
+const uploadCurrentFrame = async (folderName: string) => {
+    const canvas = imageCanvas.value
+    if (!canvas || !hasImage.value) {
+        throw new Error('暂无可采集的摄像头图像')
     }
 
-    const topic = topicMap[command]
-    if (!topic || !rosConnection.isConnected()) return
+    const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (blob) {
+                resolve(blob)
+            } else {
+                reject(new Error('生成采集图片失败'))
+            }
+        }, 'image/png')
+    })
 
-    try {
-        await rosConnection.publish(topic, 'std_msgs/Empty', {})
-    } catch (error) {
-        console.error(`Failed to publish PTZ command ${topic}:`, error)
+    const formData = new FormData()
+    formData.append('image', blob, `img_${Date.now()}.png`)
+    formData.append('folderName', folderName)
+    formData.append('sourceUrl', rosStore.connectionState.url)
+
+    const response = await fetch(`${API_BASE_URL}/images/upload`, {
+        method: 'POST',
+        body: formData
+    })
+    if (!response.ok) {
+        throw new Error(`上传采集图片失败: HTTP ${response.status}`)
     }
 }
 
-const stopAutoCapture = async () => {
-    // 清除 PTZ 定时器
-    if (ptzTimer) {
-        clearTimeout(ptzTimer)
-        ptzTimer = null
-    }
+const stopAutoCapture = async (succeeded: boolean) => {
+    captureSessionId += 1
+    rosStore.setAutoCapturing(false)
 
-    // 停止 PTZ 并归中
-    await publishPtzCommand('stop')
-    await publishPtzCommand('center')
-    
-    rosStore.setAutoCapturing(false) // Update store
-    
-    // 发布 continue 消息
+    // 图片上传结束后继续导航。
     try {
         await rosConnection.publish('/goal_queue/continue', 'std_msgs/Empty', {})
     } catch (e) {
         console.error('Failed to publish continue message:', e)
     }
 
-    // 任务结束后切换回灵动模式
-    /*
-    try {
-        await rosConnection.publish('/mode_switch', 'std_msgs/String', { data: 'lingdong' })
-        console.log('Switched back to lingdong mode')
-    } catch (e) {
-        console.error('Failed to switch to lingdong mode:', e)
+    if (succeeded) {
+        ElMessage.success('自动采集任务完成')
     }
-    */
-
-    ElMessage.success('自动采集任务完成')
 }
 
 const startAutoCapture = async (folderName: string) => {
-    rosStore.setAutoCapturing(true, folderName) // Update store
+    const sessionId = ++captureSessionId
+    rosStore.setAutoCapturing(true, folderName)
     ElMessage.info(`开始自动采集任务: ${folderName}`)
-    
-    // 切换到经典模式 (行走更稳，适合定点旋转)
-    /*
+
+    // 按摄像头当前朝向采集一张图片，不控制云台移动。
+    let succeeded = false
     try {
-        await rosConnection.publish('/mode_switch', 'std_msgs/String', { data: 'classic' })
-        console.log('Switched to classic mode for capture')
-    } catch (e) {
-        console.error('Failed to switch to classic mode:', e)
+        await uploadCurrentFrame(folderName)
+        succeeded = true
+    } catch (error) {
+        console.error('Auto capture failed:', error)
+        if (captureSessionId === sessionId) {
+            ElMessage.error(error instanceof Error ? error.message : '自动采集图片失败')
+        }
+    } finally {
+        if (captureSessionId === sessionId) {
+            await stopAutoCapture(succeeded)
+        }
     }
-    */
-
-    // 1. 开始旋转摄像头
-    // 先向左旋转
-    await publishPtzCommand('rotate_left')
-    
-    // 6秒后停止
-    ptzTimer = setTimeout(async () => {
-        await publishPtzCommand('stop')
-        
-        // 停顿1秒让云台完全停止，然后开始向右旋转
-        ptzTimer = setTimeout(async () => {
-            await publishPtzCommand('rotate_right')
-
-            // 12秒后停止
-            ptzTimer = setTimeout(async () => {
-                await publishPtzCommand('stop')
-
-                // 停顿1秒让云台完全停止，然后归中
-                ptzTimer = setTimeout(async () => {
-                    await publishPtzCommand('center')
-                }, 1000)
-            }, 8000)
-        }, 1000)
-    }, 5000)
-    
-    // 2. 采集循
-    const captureInterval = 1000 // 1000ms 采集一次
-    const duration = 20000 // 6s左 + 1s停 + 12s右 + 1s停 + 归中及冗余
-    const startTime = Date.now()
-    
-    const captureTimer = setInterval(async () => {
-        // 检查是否超时
-        if (Date.now() - startTime > duration) {
-            clearInterval(captureTimer)
-            await stopAutoCapture()
-            return
-        }
-        
-        // 采集并上传
-        if (imageCanvas.value) {
-            try {
-                imageCanvas.value.toBlob(async (blob) => {
-                    if (blob) {
-                        const formData = new FormData()
-                        const fileName = `img_${Date.now()}.png`
-                        formData.append('image', blob, fileName)
-                        formData.append('folderName', folderName)
-                        
-                        try {
-                            await fetch(`${API_BASE_URL}/images/upload`, {
-                                method: 'POST',
-                                body: formData
-                            })
-                        } catch (e) {
-                            console.error('Upload failed:', e)
-                        }
-                    }
-                }, 'image/png')
-            } catch (e) {
-                console.error('Capture failed:', e)
-            }
-        }
-    }, captureInterval)
 }
 
 const handleTaskStatusMessage = async (message: any) => {
@@ -679,22 +595,13 @@ onMounted(() => {
     if (rosStore.isAutoCapturing && rosStore.currentCaptureFolder) {
         ElMessage.warning('检测到上次未完成的自动采集任务，尝试恢复...')
         // 恢复采集逻辑：重新调用 startAutoCapture 并传入相同的 folderName
-        // 注意：这会重新触发模式切换和第一步旋转，可能不是完美的断点续传，但能保证任务继续
         startAutoCapture(rosStore.currentCaptureFolder)
     }
 })
 
 onUnmounted(() => {
-    // 清理速度发布定时器
-    if (velocityTimer) {
-        clearInterval(velocityTimer)
-    if (ptzTimer) {
-        clearTimeout(ptzTimer)
-        ptzTimer = null
-    }
-
-        velocityTimer = null
-    }
+    // 使已卸载组件的采集任务失效，由新组件恢复未完成任务。
+    captureSessionId += 1
 
     if (selectedTopic.value) {
         rosConnection.unsubscribe(selectedTopic.value)

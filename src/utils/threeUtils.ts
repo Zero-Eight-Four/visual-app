@@ -247,43 +247,7 @@ export function createMapPlane(mapData: {
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')!
-
-  const imageData = ctx.createImageData(width, height)
-  const data = imageData.data
-  const mapDataArray = mapData.data
-  const dataLength = mapDataArray.length
-
-  // 优化：使用单次循环，减少计算和内存访问
-  // 将OccupancyGrid数据转换为图像（需要翻转Y轴，因为ROS地图原点在左下角，canvas原点在左上角）
-  for (let i = 0; i < dataLength; i++) {
-    const value = mapDataArray[i]
-    let color: number
-
-    // 优化：使用快速分支预测
-    if (value === -1) {
-      color = 128 // 未知
-    } else if (value === 0) {
-      color = 255 // 空闲
-    } else if (value === 100) {
-      color = 0 // 占用
-    } else {
-      // 概率值转换为灰度（优化：避免浮点运算）
-      color = 255 - Math.floor((value * 255) / 100)
-    }
-
-    // 计算翻转后的位置
-    const x = i % width
-    const y = Math.floor(i / width)
-    const flippedY = height - 1 - y
-    const idx = (flippedY * width + x) * 4
-
-    // 批量设置RGBA值
-    data[idx] = color     // R
-    data[idx + 1] = color // G
-    data[idx + 2] = color // B
-    data[idx + 3] = 255   // A
-  }
-
+  const imageData = writeOccupancyGridToCanvas(ctx, mapData)
   ctx.putImageData(imageData, 0, 0)
 
   // 创建纹理
@@ -302,6 +266,9 @@ export function createMapPlane(mapData: {
   })
 
   const mesh = new THREE.Mesh(geometry, material)
+  mesh.userData.mapCanvas = canvas
+  mesh.userData.mapContext = ctx
+  mesh.userData.mapImageData = imageData
 
   // PlaneGeometry默认在xy平面（z轴向上），这正是我们需要的
   // 不需要旋转，地图直接显示在xy平面
@@ -333,6 +300,54 @@ export function createMapPlane(mapData: {
   return mesh
 }
 
+function writeOccupancyGridToCanvas(
+  ctx: CanvasRenderingContext2D,
+  mapData: {
+    info: {
+      width: number
+      height: number
+    }
+    data: number[]
+  },
+  reusableImageData?: ImageData
+): ImageData {
+  const { width, height } = mapData.info
+  const imageData = reusableImageData && reusableImageData.width === width && reusableImageData.height === height
+    ? reusableImageData
+    : ctx.createImageData(width, height)
+  const data = imageData.data
+  const mapDataArray = mapData.data
+
+  // Row-based traversal avoids per-pixel modulo/division while flipping ROS Y to canvas Y.
+  for (let y = 0; y < height; y++) {
+    const sourceRowStart = y * width
+    const targetRowStart = (height - 1 - y) * width * 4
+
+    for (let x = 0; x < width; x++) {
+      const value = mapDataArray[sourceRowStart + x]
+      let color: number
+
+      if (value === -1) {
+        color = 128
+      } else if (value === 0) {
+        color = 255
+      } else if (value === 100) {
+        color = 0
+      } else {
+        color = 255 - Math.floor((value * 255) / 100)
+      }
+
+      const idx = targetRowStart + x * 4
+      data[idx] = color
+      data[idx + 1] = color
+      data[idx + 2] = color
+      data[idx + 3] = 255
+    }
+  }
+
+  return imageData
+}
+
 /**
  * 更新地图平面
  */
@@ -353,55 +368,39 @@ export function updateMapPlane(
 ): void {
   const { width, height, resolution, origin } = mapData.info
 
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')!
+  let canvas = mesh.userData.mapCanvas as HTMLCanvasElement | undefined
+  let ctx = mesh.userData.mapContext as CanvasRenderingContext2D | undefined
 
-  const imageData = ctx.createImageData(width, height)
-  const data = imageData.data
-  const mapDataArray = mapData.data
-
-  // 优化：使用相同的优化逻辑
-  for (let y = 0; y < height; y++) {
-    const flippedY = height - 1 - y
-    const sourceRowStart = y * width
-    const targetRowStart = flippedY * width * 4
-
-    for (let x = 0; x < width; x++) {
-      const value = mapDataArray[sourceRowStart + x]
-      let color: number
-
-      if (value === -1) {
-        color = 128
-      } else if (value === 0) {
-        color = 255
-      } else if (value === 100) {
-        color = 0
-      } else {
-        color = Math.floor(255 - (value / 100) * 255)
-      }
-
-      const idx = targetRowStart + x * 4
-      data[idx] = color
-      data[idx + 1] = color
-      data[idx + 2] = color
-      data[idx + 3] = 255
-    }
+  if (!canvas || !ctx) {
+    canvas = document.createElement('canvas')
+    ctx = canvas.getContext('2d')!
+    mesh.userData.mapCanvas = canvas
+    mesh.userData.mapContext = ctx
   }
 
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width
+    canvas.height = height
+    mesh.userData.mapImageData = undefined
+  }
+
+  const imageData = writeOccupancyGridToCanvas(ctx, mapData, mesh.userData.mapImageData as ImageData | undefined)
+  mesh.userData.mapImageData = imageData
   ctx.putImageData(imageData, 0, 0)
 
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.minFilter = THREE.LinearFilter
-  texture.magFilter = THREE.NearestFilter
-
   const material = mesh.material as THREE.MeshBasicMaterial
-  if (material.map) {
-    material.map.dispose()
+  if (!material.map || (material.map.image as HTMLCanvasElement | undefined) !== canvas) {
+    if (material.map) {
+      material.map.dispose()
+    }
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.minFilter = THREE.LinearFilter
+    texture.magFilter = THREE.NearestFilter
+    material.map = texture
+    material.needsUpdate = true
+  } else {
+    material.map.needsUpdate = true
   }
-  material.map = texture
-  material.needsUpdate = true
 
   // 更新几何体（如果尺寸发生变化）
   const newWidth = width * resolution

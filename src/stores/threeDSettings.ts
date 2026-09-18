@@ -3,6 +3,31 @@ import { ref } from 'vue'
 import type { PublishClickType } from '@/utils/PublishClickTool'
 
 export type ViewMode = '2d' | '3d'
+export type MapLabel = 'floor1' | 'floor2' | 'map'
+
+export const MAP_TOPIC_BY_LABEL: Record<MapLabel, string> = {
+  floor1: '/map1',
+  floor2: '/map2',
+  map: '/map'
+}
+
+export const MAP_ID_BY_LABEL: Record<MapLabel, 0 | 1 | 2> = {
+  floor1: 1,
+  floor2: 2,
+  map: 0
+}
+
+export const FRAME_ID_BY_LABEL: Record<MapLabel, string> = {
+  floor1: 'floor1',
+  floor2: 'floor2',
+  map: 'map'
+}
+
+export const QUEUE_POSE_TOPIC_BY_LABEL: Record<MapLabel, string> = {
+  floor1: '/goal_queue/add_pose1',
+  floor2: '/goal_queue/add_pose2',
+  map: '/goal_queue/add_pose'
+}
 
 export const use3DSettingsStore = defineStore('threeDSettings', () => {
   // State
@@ -11,6 +36,9 @@ export const use3DSettingsStore = defineStore('threeDSettings', () => {
   const backgroundColor = ref('#f0f0f0')
   const visibleTopics = ref<string[]>([])
   const viewMode = ref<ViewMode>('2d')
+  const selectedMapLabel = ref<MapLabel>('floor1')
+  const activeMapLabel = ref<MapLabel>('map')
+  const multiFloorMapsReady = ref(false)
 
   // Publish settings
   const publishType = ref<PublishClickType>('pose_estimate')
@@ -51,6 +79,18 @@ export const use3DSettingsStore = defineStore('threeDSettings', () => {
     viewMode.value = mode
   }
 
+  function setSelectedMapLabel(label: MapLabel) {
+    selectedMapLabel.value = label
+  }
+
+  function setActiveMapLabel(label: MapLabel) {
+    activeMapLabel.value = label
+  }
+
+  function setMultiFloorMapsReady(value: boolean) {
+    multiFloorMapsReady.value = value
+  }
+
   function setPublishType(type: PublishClickType) {
     publishType.value = type
   }
@@ -79,6 +119,9 @@ export const use3DSettingsStore = defineStore('threeDSettings', () => {
     backgroundColor,
     visibleTopics,
     viewMode,
+    selectedMapLabel,
+    activeMapLabel,
+    multiFloorMapsReady,
     publishType,
     publishPointTopic,
     publishPoseTopic,
@@ -92,6 +135,9 @@ export const use3DSettingsStore = defineStore('threeDSettings', () => {
     toggleTopicVisibility,
     setVisibleTopics,
     setViewMode,
+    setSelectedMapLabel,
+    setActiveMapLabel,
+    setMultiFloorMapsReady,
     setPublishType,
     setPublishPointTopic,
     setPublishPoseTopic,

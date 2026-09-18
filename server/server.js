@@ -11,6 +11,7 @@ import { promisify } from 'util';
 import { createRequire } from 'module';
 import { getRocketMQBridge } from './rocketmqBridge.js';
 import { ScheduleManager } from './scheduleManager.js';
+import { shouldRouteImageToImage2 } from './imageRoutingConfig.js';
 
 const require = createRequire(import.meta.url);
 const weatherConfig = require('../config/weather.json');
@@ -22,16 +23,22 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = 3000;
-const TARGET_API = 'http://8.148.247.53:8000';
+const TARGET_API = process.env.TARGET_API || 'http://8.148.247.53:8000';
+const SECONDARY_AI_API = process.env.SECONDARY_AI_API || 'http://8.148.247.53:8001';
 const mqBridgePromise = getRocketMQBridge();
+
+const envFlag = (name, defaultValue = true) => {
+    const value = process.env[name];
+    if (value === undefined || value === '') return defaultValue;
+    return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
+};
+
+const ENABLE_SECONDARY_AI_PROXY = envFlag('ENABLE_SECONDARY_AI_PROXY', true);
+const ENABLE_SECONDARY_IMAGE_ROUTING = envFlag('ENABLE_SECONDARY_IMAGE_ROUTING', process.env.NODE_ENV !== 'production');
 
 // Request logging middleware
 app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
-    // Handle URL prefix from gateway
-    if (req.url.startsWith('/cscec-robot-dog')) {
-        req.url = req.url.replace('/cscec-robot-dog', '');
-    }
     next();
 });
 
@@ -70,6 +77,20 @@ app.use('/maps', async (req, res, next) => {
 app.use('/maps', express.static(join(__dirname, '../maps')));
 // Serve static files for images
 app.use('/images', express.static(join(__dirname, '../image')));
+// Serve animal species recognition result images
+app.use('/animal-species', express.static(join(__dirname, '../animal-species')));
+if (ENABLE_SECONDARY_IMAGE_ROUTING) {
+    app.use('/images2', express.static(join(__dirname, '../image2')));
+}
+
+function shouldUseSecondaryImageRoot(sourceUrl) {
+    if (!ENABLE_SECONDARY_IMAGE_ROUTING) return false;
+    return shouldRouteImageToImage2(sourceUrl);
+}
+
+function getImageRootForSource(sourceUrl) {
+    return join(__dirname, shouldUseSecondaryImageRoot(sourceUrl) ? '../image2' : '../image');
+}
 
 // Weather Cache
 const weatherCache = {
@@ -95,9 +116,64 @@ const WMO_CODES = {
     95: '雷雨', 96: '雷雨伴有冰雹', 99: '雷雨伴有冰雹'
 };
 
-const fetchJson = (url, timeout = 5000) => {
+const WEATHER_DESC_ZH = {
+    'Sunny': '晴',
+    'Clear': '晴',
+    'Partly cloudy': '局部多云',
+    'Cloudy': '多云',
+    'Overcast': '阴',
+    'Mist': '薄雾',
+    'Fog': '雾',
+    'Freezing fog': '冻雾',
+    'Patchy rain possible': '局部有雨',
+    'Patchy snow possible': '局部有雪',
+    'Patchy sleet possible': '局部雨夹雪',
+    'Patchy freezing drizzle possible': '局部冻毛毛雨',
+    'Thundery outbreaks possible': '可能有雷雨',
+    'Blowing snow': '风吹雪',
+    'Blizzard': '暴风雪',
+    'Light drizzle': '小毛毛雨',
+    'Freezing drizzle': '冻毛毛雨',
+    'Heavy freezing drizzle': '强冻毛毛雨',
+    'Light rain': '小雨',
+    'Moderate rain': '中雨',
+    'Heavy rain': '大雨',
+    'Light freezing rain': '小冻雨',
+    'Moderate or heavy freezing rain': '中到大冻雨',
+    'Light sleet': '小雨夹雪',
+    'Moderate or heavy sleet': '中到大雨夹雪',
+    'Light snow': '小雪',
+    'Moderate snow': '中雪',
+    'Heavy snow': '大雪',
+    'Ice pellets': '冰粒',
+    'Light rain shower': '小阵雨',
+    'Moderate or heavy rain shower': '中到大阵雨',
+    'Torrential rain shower': '暴雨',
+    'Light sleet showers': '小阵性雨夹雪',
+    'Moderate or heavy sleet showers': '中到大阵性雨夹雪',
+    'Light snow showers': '小阵雪',
+    'Moderate or heavy snow showers': '中到大阵雪',
+    'Light showers of ice pellets': '小冰粒阵雨',
+    'Moderate or heavy showers of ice pellets': '中到大冰粒阵雨',
+    'Patchy light rain with thunder': '局部小雷雨',
+    'Moderate or heavy rain with thunder': '中到大雷雨',
+    'Patchy light snow with thunder': '局部雷阵雪',
+    'Moderate or heavy snow with thunder': '中到大雷阵雪',
+    'Smoky haze': '烟霾',
+    'Smoke': '烟雾',
+    'Haze': '霾',
+    'Smog': '雾霾',
+    'Dust': '浮尘',
+    'Sand': '扬沙'
+};
+
+const fetchJson = (url, timeout = 12000) => {
     return new Promise((resolve, reject) => {
-        const req = https.get(url, (res) => {
+        const req = https.get(url, {
+            headers: {
+                'User-Agent': 'robot-dog-web/1.0'
+            }
+        }, (res) => {
             if (res.statusCode < 200 || res.statusCode >= 300) {
                 return reject(new Error(`Status Code: ${res.statusCode}`));
             }
@@ -119,10 +195,94 @@ const fetchJson = (url, timeout = 5000) => {
     });
 };
 
+const normalizeWeatherCity = (city) => {
+    const rawValue = Array.isArray(city) ? city[0] : city;
+    const value = String(rawValue || weatherConfig.defaultCity || '武汉')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const aliases = {
+        '武汉光谷': '武汉',
+        '光谷': '武汉',
+        'wuhan': '武汉',
+        'Wuhan': '武汉',
+        '北京': '北京市',
+        '上海': '上海市',
+        '天津': '天津市',
+        '重庆': '重庆市'
+    };
+    return aliases[value] || value;
+};
+
+const getWeatherCityCandidates = (city) => {
+    const normalizedCity = normalizeWeatherCity(city);
+    const candidates = [normalizedCity];
+
+    if (/市$/.test(normalizedCity)) {
+        candidates.push(normalizedCity.replace(/市$/, ''));
+    }
+
+    return [...new Set(candidates.filter(Boolean))];
+};
+
+const getWttrChineseText = (item) => {
+    const text = item?.lang_zh?.[0]?.value ||
+        item?.['lang_zh-cn']?.[0]?.value ||
+        item?.lang_xx?.[0]?.value ||
+        item?.weatherDesc?.[0]?.value ||
+        '未知';
+    return WEATHER_DESC_ZH[text] || text;
+};
+
+const normalizeWttrWeatherData = (data) => {
+    if (!data?.current_condition?.[0]) {
+        throw new Error('Invalid wttr.in weather response');
+    }
+
+    const current = data.current_condition[0];
+    current.lang_zh = [{ value: getWttrChineseText(current) }];
+    current.weatherDesc = current.weatherDesc || current.lang_zh;
+    current.humidity = String(current.humidity ?? '0');
+    current.windspeedKmph = String(current.windspeedKmph ?? '0');
+    current.temp_C = String(current.temp_C ?? '0');
+    current.precipMM = String(current.precipMM ?? '0');
+
+    const weather = Array.isArray(data.weather) ? data.weather : [];
+    data.weather = weather.map(day => ({
+        ...day,
+        hourly: Array.isArray(day.hourly)
+            ? day.hourly.map(hour => {
+                const desc = getWttrChineseText(hour);
+                return {
+                    ...hour,
+                    time: String(hour.time ?? '0'),
+                    chanceofrain: String(hour.chanceofrain ?? '0'),
+                    weatherDesc: hour.weatherDesc || [{ value: desc }],
+                    lang_zh: [{ value: desc }]
+                };
+            })
+            : []
+    }));
+
+    return data;
+};
+
+const fetchWttrIn = async (city) => {
+    try {
+        const normalizedCity = normalizeWeatherCity(city);
+        const url = `https://wttr.in/${encodeURIComponent(normalizedCity)}?format=j1&lang=zh-cn`;
+        const data = await fetchJson(url, 12000);
+        return normalizeWttrWeatherData(data);
+    } catch (error) {
+        console.error('wttr.in fetch failed:', error);
+        throw error;
+    }
+};
+
 const fetchOpenMeteo = async (city) => {
     try {
+        const normalizedCity = normalizeWeatherCity(city);
         // 1. Geocoding
-        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh&format=json`;
+        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(normalizedCity)}&count=1&language=zh&format=json`;
         const geoData = await fetchJson(geoUrl);
 
         if (!geoData.results || geoData.results.length === 0) {
@@ -171,17 +331,44 @@ const fetchOpenMeteo = async (city) => {
 };
 
 const fetchWeatherData = async (city) => {
-    console.log(`Fetching weather for ${city} from Open-Meteo`);
-    return await fetchOpenMeteo(city);
+    const normalizedCity = normalizeWeatherCity(city);
+    console.log(`Fetching weather for ${normalizedCity}`);
+    const cityCandidates = getWeatherCityCandidates(normalizedCity);
+
+    let lastError = null;
+
+    for (const candidate of cityCandidates) {
+        try {
+            console.log(`Trying weather provider: wttr.in (${candidate})`);
+            return await fetchWttrIn(candidate);
+        } catch (wttrError) {
+            lastError = wttrError;
+            console.warn(`wttr.in unavailable for ${candidate}:`, wttrError.message);
+        }
+    }
+
+    for (const candidate of cityCandidates) {
+        try {
+            console.log(`Trying weather provider: Open-Meteo (${candidate})`);
+            return await fetchOpenMeteo(candidate);
+        } catch (openMeteoError) {
+            lastError = openMeteoError;
+            console.error(`Open-Meteo fetch failed for ${candidate}:`, openMeteoError.message);
+        }
+    }
+
+    throw lastError || new Error(`Failed to fetch weather for ${normalizedCity}`);
 };
 
 // Prefetch weather on startup
 const prefetchWeather = async () => {
     try {
         console.log('Prefetching weather data...');
-        const data = await fetchWeatherData(weatherCache.city);
+        const city = normalizeWeatherCity(weatherCache.city);
+        const data = await fetchWeatherData(city);
         weatherCache.data = data;
         weatherCache.timestamp = Date.now();
+        weatherCache.city = city;
         console.log('Weather data prefetched successfully');
     } catch (error) {
         console.error('Failed to prefetch weather:', error);
@@ -192,7 +379,7 @@ const prefetchWeather = async () => {
 prefetchWeather();
 
 app.get('/api/weather', async (req, res) => {
-    const city = req.query.city || weatherConfig.defaultCity;
+    const city = normalizeWeatherCity(req.query.city || weatherConfig.defaultCity);
     const now = Date.now();
 
     // Check cache
@@ -217,7 +404,11 @@ app.get('/api/weather', async (req, res) => {
             console.log('Serving stale weather cache due to error');
             return res.json(weatherCache.data);
         }
-        res.status(500).json({ error: 'Failed to fetch weather data' });
+        if (weatherCache.data) {
+            console.log('Serving stale weather cache from another city due to provider error');
+            return res.json(weatherCache.data);
+        }
+        res.status(500).json({ error: 'Failed to fetch weather data', detail: error.message });
     }
 });
 
@@ -227,29 +418,9 @@ app.get('/api/weather/config', (req, res) => {
 });
 
 app.post('/api/weather/config', async (req, res) => {
-    try {
-        const { defaultCity } = req.body;
-        if (!defaultCity || typeof defaultCity !== 'string') {
-            return res.status(400).json({ error: 'Invalid defaultCity' });
-        }
-
-        // Update config object in memory
-        weatherConfig.defaultCity = defaultCity;
-
-        // Write to file
-        const configPath = join(__dirname, '../config/weather.json');
-        await writeFile(configPath, JSON.stringify(weatherConfig, null, 4));
-
-        // Update cache city if it matches the old default (optional, but good practice)
-        // If we want to force a refresh on next request for this new city, we can clear cache or just let it be.
-        // Let's just update the config.
-
-        console.log(`Updated default weather city to: ${defaultCity}`);
-        res.json({ success: true, defaultCity });
-    } catch (error) {
-        console.error('Failed to update weather config:', error);
-        res.status(500).json({ error: 'Failed to update configuration' });
-    }
+    res.status(410).json({
+        error: 'Weather default city is browser-local. Save it in localStorage instead.'
+    });
 });
 
 // 优化的流式处理：使用固定大小缓冲区，避免内存溢出
@@ -745,7 +916,8 @@ app.post('/api/videos/upload', async (req, res) => {
 
 app.post('/api/images/upload', async (req, res) => {
     await processMultipartStream(req, res, async (fields, files) => {
-        const imagesDir = join(__dirname, '../image');
+        const sourceUrl = fields.sourceUrl || fields.robotUrl || '';
+        const imagesDir = getImageRootForSource(sourceUrl);
         let fileName = '', fileData = null;
         const folderName = fields.folderName || 'default';
 
@@ -766,24 +938,12 @@ app.post('/api/images/upload', async (req, res) => {
         const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
         await writeFile(join(targetDir, safeFileName), fileData);
 
-        // If folder is 'check', manage image count
-        if (safeFolderName === 'check') {
-            try {
-                const files = await readdir(targetDir);
-                const imageFiles = files.filter(f => f.startsWith('img_'));
-                if (imageFiles.length > 100) {
-                    imageFiles.sort(); // Sort by name (timestamp)
-                    const filesToDelete = imageFiles.slice(0, imageFiles.length - 100);
-                    for (const file of filesToDelete) {
-                        await unlink(join(targetDir, file));
-                    }
-                }
-            } catch (err) {
-                console.error('Error managing check images:', err);
-            }
-        }
-
-        return { success: true, fileName: safeFileName, folder: safeFolderName };
+        return {
+            success: true,
+            fileName: safeFileName,
+            folder: safeFolderName,
+            imageRoot: shouldUseSecondaryImageRoot(sourceUrl) ? 'image2' : 'image'
+        };
     });
 });
 
@@ -1257,7 +1417,7 @@ app.post('/api/images/download-from-robot', async (req, res) => {
         const safeTargetName = (targetName || basename(normalizedRemote) || 'downloaded')
             .replace(/[^a-zA-Z0-9._-]/g, '_')
 
-        const imageRoot = join(__dirname, '../image')
+        const imageRoot = getImageRootForSource(robotUrl)
         const targetFolder = join(imageRoot, safeTargetName)
 
         // 路径安全检查，避免路径穿越
@@ -1949,12 +2109,56 @@ app.delete('/api/schedules/:id', async (req, res) => {
 
 // SSE Clients
 let sseClients = [];
+let notificationId = 0;
+const notificationHistory = [];
+const MAX_NOTIFICATION_HISTORY = 200;
+
+function normalizeNotificationImageUrl(notification) {
+    if (!notification.imageUrl || typeof notification.imageUrl !== 'string') {
+        return;
+    }
+
+    const imageDir = join(__dirname, '../image');
+    const animalSpeciesDir = join(__dirname, '../animal-species');
+    const normalizedPath = notification.imageUrl.split('\\').join('/');
+    const normalizedDir = imageDir.split('\\').join('/');
+    const normalizedAnimalSpeciesDir = animalSpeciesDir.split('\\').join('/');
+
+    if (normalizedPath.startsWith(normalizedAnimalSpeciesDir)) {
+        notification.imageUrl = '/animal-species' + normalizedPath.substring(normalizedAnimalSpeciesDir.length);
+    } else if (normalizedPath.startsWith(normalizedDir)) {
+        notification.imageUrl = '/images' + normalizedPath.substring(normalizedDir.length);
+    } else {
+        const imageMarker = '/image/';
+        const index = normalizedPath.indexOf(imageMarker);
+        if (index !== -1) {
+            notification.imageUrl = '/images' + normalizedPath.substring(index + imageMarker.length - 1);
+        }
+    }
+}
+
+function storeNotification(notification) {
+    const stored = {
+        ...notification,
+        id: ++notificationId,
+        createdAt: new Date().toISOString()
+    };
+    notificationHistory.push(stored);
+    if (notificationHistory.length > MAX_NOTIFICATION_HISTORY) {
+        notificationHistory.splice(0, notificationHistory.length - MAX_NOTIFICATION_HISTORY);
+    }
+    return stored;
+}
 
 // SSE Endpoint
 app.get('/api/events', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+    }
 
     const clientId = Date.now();
     const newClient = {
@@ -1965,41 +2169,37 @@ app.get('/api/events', (req, res) => {
 
     // Send initial connection message
     res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+    const heartbeat = setInterval(() => {
+        res.write(`: heartbeat ${Date.now()}\n\n`);
+    }, 15000);
 
     req.on('close', () => {
+        clearInterval(heartbeat);
         sseClients = sseClients.filter(client => client.id !== clientId);
+    });
+});
+
+// Polling fallback for environments where reverse proxies buffer SSE.
+app.get('/api/notifications/poll', (req, res) => {
+    const since = Number.parseInt(req.query.since || '0', 10);
+    const lastSeenId = Number.isFinite(since) ? since : 0;
+    const notifications = notificationHistory.filter(item => item.id > lastSeenId);
+    res.json({
+        success: true,
+        lastId: notificationId,
+        notifications
     });
 });
 
 // Notification Endpoint
 app.post('/api/notification', (req, res) => {
-    const notification = req.body;
-
-    // Handle local file paths in imageUrl
-    if (notification.imageUrl && typeof notification.imageUrl === 'string') {
-        // Check if it's an absolute path pointing to the image directory
-        const imageDir = join(__dirname, '../image');
-        // Normalize paths to ensure consistent comparison
-        const normalizedPath = notification.imageUrl.split('\\').join('/');
-        const normalizedDir = imageDir.split('\\').join('/');
-
-        if (normalizedPath.startsWith(normalizedDir)) {
-            // Replace absolute path with relative URL
-            notification.imageUrl = '/images' + normalizedPath.substring(normalizedDir.length);
-        } else {
-            // Fallback: try to find "/image/" in the path and use it as relative root
-            // This handles cases where host path structure differs from container path
-            const imageMarker = '/image/';
-            const index = normalizedPath.indexOf(imageMarker);
-            if (index !== -1) {
-                notification.imageUrl = '/images' + normalizedPath.substring(index + imageMarker.length - 1); // include /
-            }
-        }
-    }
+    const notification = { ...req.body };
+    normalizeNotificationImageUrl(notification);
+    const storedNotification = storeNotification(notification);
 
     // Send to all connected clients
     sseClients.forEach(client => {
-        client.res.write(`data: ${JSON.stringify(notification)}\n\n`);
+        client.res.write(`data: ${JSON.stringify(storedNotification)}\n\n`);
     });
 
     res.json({ success: true, count: sseClients.length });
@@ -2137,6 +2337,32 @@ app.use('/api/robot-files', async (req, res) => {
         })
     }
 })
+
+if (ENABLE_SECONDARY_AI_PROXY) {
+    app.use('/api/ai-secondary-mirror', createProxyMiddleware({
+        target: SECONDARY_AI_API,
+        changeOrigin: true,
+        ws: true,
+        pathRewrite: {
+            '^/api/ai-secondary-mirror': '/api'
+        }
+    }));
+
+    // Secondary AI backend proxy. Kept for direct diagnostics.
+    app.use('/api2', createProxyMiddleware({
+        target: SECONDARY_AI_API,
+        changeOrigin: true,
+        ws: true,
+        pathRewrite: {
+            '^/': '/api/'
+        }
+    }));
+
+} else {
+    app.use(['/api/ai-secondary-mirror', '/api2'], (req, res) => {
+        res.status(404).json({ error: 'Secondary AI proxy is disabled in this deployment.' });
+    });
+}
 
 // Proxy all other API requests to Python backend
 app.use('/api', createProxyMiddleware({

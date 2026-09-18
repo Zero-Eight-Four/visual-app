@@ -223,17 +223,33 @@
                 </el-table-column>
                 <el-table-column
                   label="操作"
-                  width="180"
+                  width="260"
                 >
                   <template #default="scope">
                     <el-link
-                      :href="getReportDownloadUrl(scope.row.name)"
+                      :href="getReportDownloadUrl(scope.row)"
                       target="_blank"
                       type="primary"
                       style="margin-right: 10px;"
                     >
                       查看
                     </el-link>
+                    <el-button
+                      type="primary"
+                      size="small"
+                      link
+                      @click="downloadReport(scope.row)"
+                    >
+                      下载
+                    </el-button>
+                    <el-button
+                      type="primary"
+                      size="small"
+                      link
+                      @click="printReport(scope.row)"
+                    >
+                      打印
+                    </el-button>
                     <el-button
                       type="danger"
                       size="small"
@@ -247,6 +263,15 @@
               </el-table>
             </el-collapse-item>
           </el-collapse>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane
+        label="语音控制"
+        name="voice"
+      >
+        <div class="tab-content voice-tab-content">
+          <VoicePanel />
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -426,6 +451,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElEmpty, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { aiService, type Stream, type Report } from '../../services/aiService'
+import VoicePanel from '@/components/panels/VoicePanel.vue'
 
 const props = defineProps<{
     initialTab?: string
@@ -513,29 +539,28 @@ const getReportFullUrl = (url: string) => {
     // 如果是生产环境，直接返回完整 URL
     if (import.meta.env.PROD) {
         if (url.startsWith('http')) return url
-        // 如果是相对路径，拼接 API_BASE_URL
-        // 假设 url 是 /reports/xxx.html
-        // API_BASE_URL 是 https://ibl.zjypwy.com/cscec-robot-dog/api
-        // 我们需要 https://ibl.zjypwy.com/cscec-robot-dog/api/reports/xxx.html
-        // 或者如果 url 已经包含 /api，则不需要拼接
         if (url.startsWith('/api')) {
              const baseUrl = API_BASE_URL.replace(/\/api$/, '')
              return `${baseUrl}${url}`
         }
-        // 假设 url 是 /reports/xxx
         return `${API_BASE_URL}${url}`
     }
 
-    // If URL is absolute and points to the backend IP, convert to relative /api path
-    if (url.startsWith('https://ibl.zjypwy.com/cscec-robot-dog/api')) {
-        return url.replace('https://ibl.zjypwy.com/cscec-robot-dog/api', '/api')
+    if (url.startsWith('http')) {
+        try {
+            const parsedUrl = new URL(url)
+            const apiIndex = parsedUrl.pathname.indexOf('/api/')
+            if (apiIndex >= 0) {
+                return `${parsedUrl.pathname.slice(apiIndex)}${parsedUrl.search}${parsedUrl.hash}`
+            }
+
+        } catch (error) {
+            return url
+        }
+
+        return url
     }
-    if (url.startsWith('https://ibl.zjypwy.com/cscec-robot-dog')) {
-        return url.replace('https://ibl.zjypwy.com/cscec-robot-dog', '')
-    }
-    
-    if (url.startsWith('http')) return url
-    // Use relative path to support both HTTP and HTTPS
+
     return url.startsWith('/') ? url : `/${url}`
 }
 
@@ -721,8 +746,68 @@ const formatTime = (timestamp: number) => {
     return new Date(timestamp * 1000).toLocaleString()
 }
 
-const getReportDownloadUrl = (filename: string) => {
-    return aiService.getReportUrl(filename)
+const getReportDownloadUrl = (report: Report) => {
+    return aiService.getReportUrl(report.name, report.source)
+}
+
+const downloadReport = (report: Report) => {
+    const url = getReportDownloadUrl(report)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = report.name
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+}
+
+const printReport = (report: Report) => {
+    const url = getReportDownloadUrl(report)
+    const iframe = document.createElement('iframe')
+
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = '0'
+    iframe.title = `打印报告-${report.name}`
+
+    let cleanupTimer: number | null = null
+    const cleanup = () => {
+        if (cleanupTimer !== null) {
+            window.clearTimeout(cleanupTimer)
+        }
+        cleanupTimer = window.setTimeout(() => {
+            if (iframe.parentNode) {
+                iframe.parentNode.removeChild(iframe)
+            }
+        }, 1000)
+    }
+
+    iframe.onload = () => {
+        try {
+            if (iframe.contentWindow) {
+                iframe.contentWindow.onafterprint = cleanup
+            }
+            iframe.contentWindow?.focus()
+            iframe.contentWindow?.print()
+            cleanupTimer = window.setTimeout(cleanup, 60000)
+        } catch (error) {
+            cleanup()
+            window.open(url, '_blank', 'noopener')
+            ElMessage.warning('浏览器限制了直接打印，已在新窗口打开报告')
+        }
+    }
+
+    iframe.onerror = () => {
+        cleanup()
+        window.open(url, '_blank', 'noopener')
+        ElMessage.error('报告加载失败，已尝试在新窗口打开')
+    }
+
+    document.body.appendChild(iframe)
+    iframe.src = url
 }
 
 const deleteReport = async (filename: string) => {
@@ -780,6 +865,10 @@ onMounted(() => {
     box-sizing: border-box;
 }
 
+.voice-tab-content {
+    padding: 12px 0 0;
+}
+
 .upload-section, .folder-section {
     max-width: 800px;
     margin: 0 auto;
@@ -807,6 +896,7 @@ onMounted(() => {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
 }
 
 .stream-actions {

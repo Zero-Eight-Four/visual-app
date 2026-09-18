@@ -3,7 +3,13 @@
     <!-- Top App Bar -->
     <div class="app-bar">
       <div class="app-title">
-        机器狗控制平台
+        <img
+          :src="appLogoUrl"
+          alt="机器狗控制平台"
+          class="app-logo"
+        >
+        <span class="app-title-divider" aria-hidden="true"></span>
+        <span class="app-title-text">机器狗控制平台</span>
       </div>
     </div>
 
@@ -218,6 +224,9 @@ import ThreeDSettings from '@/components/settings/ThreeDSettings.vue'
 import ImageSettings from '@/components/settings/ImageSettings.vue'
 import { rosConnection } from '@/services/rosConnection'
 
+const appLogoFile = import.meta.env.VITE_APP_LOGO || 'logo-placeholder.png'
+const appLogoUrl = `${import.meta.env.BASE_URL}${appLogoFile}`
+
 // 3D面板引用
 const threeDPanelRef = ref()
 
@@ -317,7 +326,7 @@ const handleAIClose = () => {
 }
 
 .app-bar {
-    height: 48px;
+    height: 56px;
     background-color: #ffffff;
     border-bottom: 1px solid #e0e0e0;
     display: flex;
@@ -327,9 +336,37 @@ const handleAIClose = () => {
 }
 
 .app-title {
-    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 100%;
+}
+
+.app-logo {
+    display: block;
+    width: auto;
+    height: 32px;
+    max-width: 220px;
+    object-fit: contain;
+}
+
+.app-title-divider {
+    width: 2px;
+    height: 18px;
+    flex: 0 0 auto;
+    background-color: #6D6D6D;
+}
+
+.app-title-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    color: #404040;
+    font-family: var(--app-font-family);
+    font-size: 17px;
     font-weight: 600;
-    color: #333;
+    line-height: 1;
+    white-space: nowrap;
 }
 
 .workspace-content {

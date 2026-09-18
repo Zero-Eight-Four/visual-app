@@ -1,37 +1,66 @@
-# 依赖
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+dist-ssr/
+build/
+release/
+server/dist/
+server/build/
+.vite/
+
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# 构建输出
-dist/
-dist-ssr/
-build/
-*.local
-.vite/
-
-# 环境变量
+# Environment and local config
 .env
-.env.local
-.env.*.local
-.env.production
-.env.development
+.env.*
+!.env.example
+!*.env.example
+deploy/.env
+deploy/.env.*
+!deploy/.env.example
+*.local
+config/*.local.json
 
-# 编辑器/IDE
-.github/
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-*.sublime-project
-*.sublime-workspace
+# Runtime data and user uploads
+maps/
+videos/
+reports/
+image/
+image2/
+animal-species/
+temp/
+tmp/
 
-# 操作系统
+# Certificates, keys, and secrets
+certs/
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+
+# Cache and coverage
+.cache/
+.parcel-cache/
+.turbo/
+.nyc_output/
+coverage/
+*.lcov
+.eslintcache
+.prettiercache
+*.tsbuildinfo
+
+# OS files
 .DS_Store
 .DS_Store?
 ._*
@@ -41,55 +70,25 @@ ehthumbs.db
 Thumbs.db
 Desktop.ini
 
-# 日志文件
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-.pnpm-debug.log*
-
-# 测试覆盖率
-coverage/
-*.lcov
-.nyc_output/
-
-# 临时文件
-tmp/
-temp/
-*.tmp
-.cache/
-
-# 项目特定的数据目录（包含用户上传的数据）
-maps/
-videos/
-reports/
-image/
-temp/
-
-# TypeScript
-*.tsbuildinfo
-.tsbuildinfo
-
-# ESLint 缓存
-.eslintcache
-
-# Prettier 缓存
-.prettiercache
-
-# 服务器相关
-server/dist/
-server/build/
-server/*.log
-
-# PM2
-.pm2/
-ecosystem.config.js.bak
-
-# 其他
-*.pem
-*.key
-*.cert
-.cursor/
+# Editors
+.idea/
+.vscode/
 .vscode-test/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+.cursor/
+
+# Package manager cache
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Process managers and backups
+.pm2/
+*.bak

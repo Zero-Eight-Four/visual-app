@@ -4,6 +4,39 @@
       ref="canvasContainer"
       class="canvas-container"
     />
+    <div
+      v-if="threeInitializationError"
+      class="map-render-error"
+    >
+      <span>{{ threeInitializationError }}</span>
+      <el-button
+        size="small"
+        type="primary"
+        @click="initializeThreePanel"
+      >
+        重试
+      </el-button>
+    </div>
+    <div
+      v-if="settingsStore.multiFloorMapsReady"
+      class="map-floor-tabs"
+    >
+      <el-radio-group
+        v-model="selectedMapLabel"
+        class="map-floor-tabs-group"
+        @change="handleMapLabelChange"
+      >
+        <el-radio-button label="map">
+          当前
+        </el-radio-button>
+        <el-radio-button label="floor1">
+          一楼
+        </el-radio-button>
+        <el-radio-button label="floor2">
+          二楼
+        </el-radio-button>
+      </el-radio-group>
+    </div>
     <div class="map-controls">
       <el-button
         size="small"
@@ -20,11 +53,17 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { ElButton, ElIcon, ElMessage, ElMessageBox } from 'element-plus'
+import { ElButton, ElIcon, ElMessage, ElMessageBox, ElRadioButton, ElRadioGroup } from 'element-plus'
 import { FullScreen } from '@element-plus/icons-vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { use3DSettingsStore } from '@/stores/threeDSettings'
+import {
+    FRAME_ID_BY_LABEL,
+    MAP_TOPIC_BY_LABEL,
+    QUEUE_POSE_TOPIC_BY_LABEL,
+    use3DSettingsStore,
+    type MapLabel
+} from '@/stores/threeDSettings'
 import { useRosStore } from '@/stores/ros'
 import { rosConnection } from '@/services/rosConnection'
 import { createMapPlane, updateMapPlane } from '@/utils/threeUtils'
@@ -35,11 +74,14 @@ const settingsStore = use3DSettingsStore()
 const rosStore = useRosStore()
 const canvasContainer = ref<HTMLDivElement>()
 const publishActive = ref(false)
+const selectedMapLabel = ref<MapLabel>(settingsStore.selectedMapLabel)
+const threeInitializationError = ref('')
 
 let scene: THREE.Scene
 let camera: THREE.PerspectiveCamera
 let renderer: THREE.WebGLRenderer
 let controls: OrbitControls
+let isThreeReady = false
 let gridHelper: THREE.GridHelper
 let animationId: number
 let mapMesh: THREE.Mesh | null = null
@@ -49,38 +91,92 @@ let mouse: THREE.Vector2 | null = null
 let mapSubscriptionTimer: number | null = null
 let hasReceivedMapData = false
 let currentMapData: any = null
+let currentMapLabel: MapLabel = settingsStore.activeMapLabel
+let currentMarkerTopic = ''
+const mapLabels: MapLabel[] = ['map', 'floor1', 'floor2']
+const mapDataByLabel: Partial<Record<MapLabel, any>> = {}
+const mapMeshByLabel: Partial<Record<MapLabel, THREE.Mesh>> = {}
+const mapSignatureByLabel: Partial<Record<MapLabel, string>> = {}
+const mapVersionByLabel: Record<MapLabel, number> = {
+    map: 0,
+    floor1: 0,
+    floor2: 0
+}
+const receivedMapLabels: Record<MapLabel, boolean> = {
+    map: false,
+    floor1: false,
+    floor2: false
+}
 let resizeObserver: ResizeObserver | null = null
 let resizeTimeout: number | null = null
+let resizeHandler: (() => void) | null = null
 
-const initThreeJS = () => {
-    if (!canvasContainer.value) return
+const subscribeToMapTopic = async (label: MapLabel) => {
+    await rosConnection.subscribe({
+        topic: MAP_TOPIC_BY_LABEL[label],
+        messageType: 'nav_msgs/OccupancyGrid',
+        compression: 'cbor',
+        throttleRate: label === 'map' ? 0 : 1000,
+        callback: (message: any) => {
+            hasReceivedMapData = true
+            handleMapMessage(label, message)
+        }
+    })
+}
 
-    // 创建场景
-    scene = new THREE.Scene()
-    scene.background = new THREE.Color(0xf0f0f0)
+const initThreeJS = (): boolean => {
+    const container = canvasContainer.value
+    if (!container || isThreeReady) return isThreeReady
 
-    // 创建相机
-    const width = canvasContainer.value.clientWidth
-    const height = canvasContainer.value.clientHeight
-    camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
+    threeInitializationError.value = ''
 
-    // 根据视图模式设置相机位置
+    // 先在局部变量中完成关键对象的创建，避免 scene 已存在但 controls
+    // 尚未创建时，ROS 回调误判为初始化完成。
+    const nextScene = new THREE.Scene()
+    nextScene.background = new THREE.Color(0xf0f0f0)
+
+    const width = Math.max(container.clientWidth, 1)
+    const height = Math.max(container.clientHeight, 1)
+    const nextCamera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
+
     if (settingsStore.viewMode === '2d') {
-        camera.position.set(0, 0, 20)
-        camera.lookAt(0, 0, 0)
+        nextCamera.position.set(0, 0, 20)
+        nextCamera.lookAt(0, 0, 0)
     } else {
-        camera.position.set(10, 10, 10)
-        camera.lookAt(0, 0, 0)
+        nextCamera.position.set(10, 10, 10)
+        nextCamera.lookAt(0, 0, 0)
     }
 
-    // 创建渲染器
-    renderer = new THREE.WebGLRenderer({ antialias: true })
-    renderer.setSize(width, height)
-    renderer.setPixelRatio(window.devicePixelRatio)
-    canvasContainer.value.appendChild(renderer.domElement)
+    let nextRenderer: THREE.WebGLRenderer | null = null
+    try {
+        try {
+            nextRenderer = new THREE.WebGLRenderer({ antialias: true })
+        } catch (error) {
+            // 部分低配显卡或远程桌面环境无法创建抗锯齿上下文，降级后重试。
+            console.warn('[Map] WebGL 抗锯齿上下文创建失败，尝试兼容模式:', error)
+            nextRenderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'low-power' })
+        }
 
-    // 添加轨道控制器
-    controls = new OrbitControls(camera, renderer.domElement)
+        if (!nextRenderer) {
+            throw new Error('WebGL renderer was not created')
+        }
+        const nextControls = new OrbitControls(nextCamera, nextRenderer.domElement)
+        scene = nextScene
+        camera = nextCamera
+        renderer = nextRenderer
+        controls = nextControls
+    } catch (error) {
+        nextRenderer?.dispose()
+        console.error('❌ 地图渲染器初始化失败:', error)
+        threeInitializationError.value = '地图渲染初始化失败，请检查浏览器是否启用了硬件加速后重试'
+        return false
+    }
+
+    renderer.setSize(width, height)
+    // 限制高 DPI 设备的显存占用，降低低配显卡创建/丢失 WebGL 上下文的概率。
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+    container.appendChild(renderer.domElement)
+
     controls.enableDamping = true
     controls.dampingFactor = 0.05
 
@@ -145,14 +241,6 @@ const initThreeJS = () => {
     // 初始化发布工具
     initPublishTool()
 
-    // 如果已经连接，立即订阅话题（否则由watch处理）
-    if (rosConnection.isConnected()) {
-        subscribeToMap()
-        subscribeToFootprint()
-        subscribeToPlan()
-        subscribeToMarkers()
-    }
-
     // 初始化Raycaster用于鼠标拾取
     raycaster = new THREE.Raycaster()
     mouse = new THREE.Vector2()
@@ -163,33 +251,35 @@ const initThreeJS = () => {
     renderer.domElement.addEventListener('contextmenu', handleContextMenu)
 
     // 窗口大小调整
-    const handleResize = () => {
-        if (!canvasContainer.value) return
-        const width = canvasContainer.value.clientWidth
-        const height = canvasContainer.value.clientHeight
+    resizeHandler = () => {
+        if (!canvasContainer.value || !isThreeReady) return
+        const width = Math.max(canvasContainer.value.clientWidth, 1)
+        const height = Math.max(canvasContainer.value.clientHeight, 1)
         camera.aspect = width / height
         camera.updateProjectionMatrix()
         renderer.setSize(width, height)
     }
-    window.addEventListener('resize', handleResize)
+    window.addEventListener('resize', resizeHandler)
 
     // 使用 ResizeObserver 监听容器大小变化（带防抖）
-    resizeObserver = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-            if (entry.target === canvasContainer.value) {
-                // 清除之前的定时器
-                if (resizeTimeout) {
-                    clearTimeout(resizeTimeout)
+    if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.target === canvasContainer.value) {
+                    // 清除之前的定时器
+                    if (resizeTimeout) {
+                        clearTimeout(resizeTimeout)
+                    }
+                    // 延迟执行，避免在动画过程中频繁触发
+                    resizeTimeout = window.setTimeout(() => {
+                        resizeHandler?.()
+                        resizeTimeout = null
+                    }, 100)
                 }
-                // 延迟执行，避免在动画过程中频繁触发
-                resizeTimeout = window.setTimeout(() => {
-                    handleResize()
-                    resizeTimeout = null
-                }, 100)
             }
-        }
-    })
-    resizeObserver.observe(canvasContainer.value)
+        })
+        resizeObserver.observe(container)
+    }
 
     // 动画循环
     const animate = () => {
@@ -218,7 +308,38 @@ const initThreeJS = () => {
 
         renderer.render(scene, camera)
     }
-    animate()
+    isThreeReady = true
+    try {
+        animate()
+    } catch (error) {
+        isThreeReady = false
+        if (animationId) {
+            cancelAnimationFrame(animationId)
+        }
+        renderer.domElement.removeEventListener('mousemove', handleMouseMove)
+        renderer.domElement.removeEventListener('click', handleMouseClick)
+        renderer.domElement.removeEventListener('contextmenu', handleContextMenu)
+        renderer.domElement.remove()
+        resizeObserver?.disconnect()
+        resizeObserver = null
+        if (resizeHandler) {
+            window.removeEventListener('resize', resizeHandler)
+            resizeHandler = null
+        }
+        publishTool?.dispose()
+        publishTool = null
+        controls.dispose()
+        renderer.dispose()
+        console.error('❌ 地图首次渲染失败:', error)
+        threeInitializationError.value = '地图首次渲染失败，请检查浏览器硬件加速或显卡驱动后重试'
+        return false
+    }
+
+    // 初始化期间若已有旧订阅送来地图消息，在渲染器就绪后补画一次。
+    if (mapDataByLabel[getDisplayMapLabel()]) {
+        renderMapForLabel(getDisplayMapLabel())
+    }
+    return true
 }
 
 // 订阅地图话题
@@ -228,19 +349,15 @@ const subscribeToMap = async () => {
     }
 
     try {
-        // 先取消订阅（如果已存在）
-        rosConnection.unsubscribe('/map')
+        // 同时订阅旧版活动地图和新版楼层预览地图，用收到的数据决定启用哪套逻辑。
+        // 不在这里清空已收到的地图缓存；部分地图话题不是持续发布，重复订阅后未必会立刻重发。
+        mapLabels.forEach(label => {
+            rosConnection.unsubscribe(MAP_TOPIC_BY_LABEL[label])
+        })
+        updateMultiFloorAvailability()
         hasReceivedMapData = false
 
-        await rosConnection.subscribe({
-            topic: '/map',
-            messageType: 'nav_msgs/OccupancyGrid',
-            compression: 'cbor',
-            callback: (message: any) => {
-                hasReceivedMapData = true
-                handleMapMessage(message)
-            }
-        })
+        await Promise.all(mapLabels.map(label => subscribeToMapTopic(label)))
 
         // 启动定期检查机制：如果10秒内没有收到数据，重新订阅
         if (mapSubscriptionTimer) {
@@ -256,9 +373,194 @@ const subscribeToMap = async () => {
     }
 }
 
+const getDisplayMapLabel = (): MapLabel => {
+    return settingsStore.multiFloorMapsReady ? settingsStore.selectedMapLabel : 'map'
+}
+
+const getEffectivePublishMapLabel = (): MapLabel => {
+    return settingsStore.multiFloorMapsReady ? settingsStore.selectedMapLabel : 'map'
+}
+
+const isCurrentMapPublishBlocked = (type: PublishClickType) => {
+    return settingsStore.multiFloorMapsReady &&
+        settingsStore.selectedMapLabel === 'map' &&
+        type === 'pose'
+}
+
+const updateMultiFloorAvailability = () => {
+    const ready = receivedMapLabels.floor1 && receivedMapLabels.floor2
+    if (settingsStore.multiFloorMapsReady !== ready) {
+        settingsStore.setMultiFloorMapsReady(ready)
+        console.info(
+            `[Map] multi-floor maps ${ready ? 'ready' : 'not ready'}`,
+            {
+                map: receivedMapLabels.map,
+                map1: receivedMapLabels.floor1,
+                map2: receivedMapLabels.floor2
+            }
+        )
+    }
+
+    if (!ready && settingsStore.selectedMapLabel !== 'map') {
+        settingsStore.setSelectedMapLabel('map')
+        selectedMapLabel.value = 'map'
+        return
+    }
+
+}
+
+const getMapSignature = (message: any): string => {
+    const info = message?.info
+    const header = message?.header
+    const stamp = header?.stamp || info?.map_load_time
+    const stampKey = stamp ? `${stamp.sec ?? 0}.${stamp.nsec ?? 0}` : ''
+
+    if (!info || !stampKey) {
+        return ''
+    }
+
+    const origin = info.origin?.position || {}
+    return [
+        stampKey,
+        header?.seq ?? '',
+        info.width,
+        info.height,
+        info.resolution,
+        origin.x ?? 0,
+        origin.y ?? 0,
+        message.data?.length ?? 0
+    ].join('|')
+}
+
+const clearMapMesh = () => {
+    if (!mapMesh) return
+
+    scene?.remove(mapMesh)
+    mapMesh = null
+    currentMapData = null
+}
+
+const disposeMapMesh = (mesh: THREE.Mesh) => {
+    if (mesh.parent) {
+        mesh.parent.remove(mesh)
+    }
+    mesh.geometry?.dispose()
+    const material = mesh.material as THREE.MeshBasicMaterial
+    if (material.map) {
+        material.map.dispose()
+    }
+    material.dispose()
+}
+
+const disposeCachedMapMeshes = () => {
+    mapLabels.forEach(label => {
+        const cachedMesh = mapMeshByLabel[label]
+        if (cachedMesh) {
+            disposeMapMesh(cachedMesh)
+            delete mapMeshByLabel[label]
+        }
+        delete mapDataByLabel[label]
+        delete mapSignatureByLabel[label]
+        mapVersionByLabel[label] = 0
+    })
+    mapMesh = null
+    currentMapData = null
+}
+
+const renderMapForLabel = (label: MapLabel) => {
+    const mapData = mapDataByLabel[label]
+    clearMapMesh()
+    if (!mapData || !isThreeReady) {
+        return
+    }
+
+    const signature = mapSignatureByLabel[label] || `version:${mapVersionByLabel[label]}`
+    let nextMesh = mapMeshByLabel[label] || null
+    if (!nextMesh) {
+        nextMesh = createMapPlane(mapData)
+        nextMesh.userData.mapSignature = signature
+        mapMeshByLabel[label] = nextMesh
+    } else if (signature && nextMesh.userData.mapSignature !== signature) {
+        updateMapPlane(nextMesh, mapData)
+        nextMesh.userData.mapSignature = signature
+    }
+
+    mapMesh = nextMesh
+    currentMapData = mapData
+    scene.add(nextMesh)
+
+    if (nextMesh) {
+        fitCameraToMap(mapData)
+    }
+}
+
+const refreshActiveMapTopic = async () => {
+    delete mapDataByLabel.map
+    delete mapSignatureByLabel.map
+    mapVersionByLabel.map += 1
+
+    const cachedMapMesh = mapMeshByLabel.map
+    if (cachedMapMesh) {
+        disposeMapMesh(cachedMapMesh)
+        delete mapMeshByLabel.map
+    }
+
+    if (getDisplayMapLabel() === 'map') {
+        clearMapMesh()
+    }
+
+    if (!rosConnection.isConnected()) return
+
+    try {
+        rosConnection.unsubscribe(MAP_TOPIC_BY_LABEL.map)
+        await subscribeToMapTopic('map')
+    } catch (error) {
+        console.error('刷新当前地图订阅失败:', error)
+    }
+}
+
+const handleMapLabelChange = (label: string | number | boolean | undefined) => {
+    const nextLabel = (label || getDisplayMapLabel()) as MapLabel
+    if (!settingsStore.multiFloorMapsReady && nextLabel !== 'map') {
+        selectedMapLabel.value = 'map'
+        settingsStore.setSelectedMapLabel('map')
+        ElMessage.warning('未同时收到一楼和二楼地图，已使用旧版当前地图模式')
+        return
+    }
+
+    settingsStore.setSelectedMapLabel(nextLabel)
+    renderMapForLabel(getDisplayMapLabel())
+}
+
 // 处理地图消息
-const handleMapMessage = (message: any) => {
-    if (!scene) {
+const handleMapMessage = (label: MapLabel, message: any) => {
+    const isActiveMapTopic = label === 'map'
+    const signature = getMapSignature(message)
+    if (!isActiveMapTopic && signature && mapSignatureByLabel[label] === signature) {
+        return
+    }
+
+    if (signature && !isActiveMapTopic) {
+        mapSignatureByLabel[label] = signature
+    } else {
+        mapVersionByLabel[label] += 1
+    }
+    const effectiveSignature = isActiveMapTopic
+        ? `active:${Date.now()}:${mapVersionByLabel[label]}`
+        : signature || `version:${mapVersionByLabel[label]}`
+    mapSignatureByLabel[label] = effectiveSignature
+
+    mapDataByLabel[label] = message
+    receivedMapLabels[label] = true
+    console.debug(`[Map] received ${MAP_TOPIC_BY_LABEL[label]} (${message.info?.width}x${message.info?.height})`)
+    updateMultiFloorAvailability()
+
+    if (label !== getDisplayMapLabel()) {
+        return
+    }
+
+    // 消息可以先缓存，但只有相机、渲染器和控制器全部就绪后才能创建地图。
+    if (!isThreeReady) {
         return
     }
 
@@ -277,13 +579,20 @@ const handleMapMessage = (message: any) => {
         if (mapMesh) {
             // 更新现有地图
             updateMapPlane(mapMesh, message)
+            mapMesh.userData.mapSignature = effectiveSignature
             if (totalPixels > 1000000) {
                 ElMessage.success('地图更新完成')
             }
         } else {
             // 创建新地图
-            mapMesh = createMapPlane(message)
-            if (mapMesh) {
+            const cachedMesh = mapMeshByLabel[label]
+            mapMesh = cachedMesh || createMapPlane(message)
+            if (cachedMesh && cachedMesh.userData.mapSignature !== effectiveSignature) {
+                updateMapPlane(cachedMesh, message)
+            }
+            mapMesh.userData.mapSignature = effectiveSignature
+            mapMeshByLabel[label] = mapMesh
+            if (mapMesh && !mapMesh.parent) {
                 scene.add(mapMesh)
                 // 自动调整相机以适应地图
                 fitCameraToMap(message)
@@ -420,34 +729,138 @@ const handlePlanMessage = (message: any) => {
 let markerObjects: THREE.Object3D[] = []
 // 存储文本sprite的引用和原始大小，用于固定屏幕大小
 let textSprites: Array<{ sprite: THREE.Sprite; baseScale: number }> = []
+let hasFloorMarkerTopics = false
+const markerMessagesByTopic: Record<string, any> = {}
+const markerTopics = ['/goal_queue/markers', '/goal_queue/markers1', '/goal_queue/markers2']
+
+const clearMarkers = () => {
+    markerObjects.forEach(obj => {
+        scene?.remove(obj)
+        disposeMarkerObject(obj)
+    })
+    markerObjects = []
+    textSprites = []
+}
+
+const normalizeMapLabel = (value: string): MapLabel => {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'floor1' || normalized === 'map1' || normalized === '/map1/goal') return 'floor1'
+    if (normalized === 'floor2' || normalized === 'map2' || normalized === '/map2/goal') return 'floor2'
+    return 'map'
+}
+
+const getMarkerTopicForCurrentView = () => {
+    if (!hasFloorMarkerTopics) {
+        return '/goal_queue/markers'
+    }
+
+    const displayLabel = getDisplayMapLabel()
+    const markerLabel = displayLabel === 'map' ? currentMapLabel : displayLabel
+
+    if (markerLabel === 'floor1') return '/goal_queue/markers1'
+    if (markerLabel === 'floor2') return '/goal_queue/markers2'
+    return ''
+}
+
 const subscribeToMarkers = async () => {
     if (!rosConnection.isConnected()) return
 
     try {
-        // 先取消订阅（如果已存在）
-        rosConnection.unsubscribe('/goal_queue/markers')
+        const nextTopic = getMarkerTopicForCurrentView()
+        markerTopics.forEach(topic => {
+            rosConnection.unsubscribe(topic)
+        })
+        currentMarkerTopic = nextTopic
+        clearMarkers()
 
-        await rosConnection.subscribe({
-            topic: '/goal_queue/markers',
+        await Promise.all(markerTopics.map(topic => rosConnection.subscribe({
+            topic,
             messageType: 'visualization_msgs/MarkerArray',
             callback: (message: any) => {
-                handleMarkersMessage(message)
+                handleMarkerTopicMessage(topic, message)
             }
-        })
+        })))
+
+        if (currentMarkerTopic && markerMessagesByTopic[currentMarkerTopic]) {
+            handleMarkersMessage(markerMessagesByTopic[currentMarkerTopic])
+        }
     } catch (error) {
         console.error('订阅markers话题失败:', error)
     }
 }
 
-// 订阅/goal_queue/stop话题，用于任务完成后趴下
+const switchMarkerTopicIfNeeded = () => {
+    const nextTopic = getMarkerTopicForCurrentView()
+    if (nextTopic === currentMarkerTopic) {
+        return
+    }
+
+    currentMarkerTopic = nextTopic
+    clearMarkers()
+
+    if (currentMarkerTopic && markerMessagesByTopic[currentMarkerTopic]) {
+        handleMarkersMessage(markerMessagesByTopic[currentMarkerTopic])
+    }
+}
+
+const handleMarkerTopicMessage = (topic: string, message: any) => {
+    markerMessagesByTopic[topic] = message
+
+    if ((topic === '/goal_queue/markers1' || topic === '/goal_queue/markers2') && !hasFloorMarkerTopics) {
+        hasFloorMarkerTopics = true
+        console.info('[Marker] detected floor marker topics, switching to multi-floor marker display')
+        switchMarkerTopicIfNeeded()
+    }
+
+    if (topic === currentMarkerTopic) {
+        handleMarkersMessage(message)
+    }
+}
+
+const subscribeToCurrentMap = async () => {
+    if (!rosConnection.isConnected()) return
+
+    try {
+        rosConnection.unsubscribe('/map_manager/current_map')
+
+        await rosConnection.subscribe({
+            topic: '/map_manager/current_map',
+            messageType: 'std_msgs/String',
+            callback: (message: any) => {
+                const value = typeof message === 'string' ? message : message?.data
+                if (typeof value !== 'string') return
+
+                const nextLabel = normalizeMapLabel(value)
+                if (nextLabel === currentMapLabel) return
+
+                currentMapLabel = nextLabel
+                settingsStore.setActiveMapLabel(nextLabel)
+                refreshActiveMapTopic()
+                if (settingsStore.multiFloorMapsReady && getDisplayMapLabel() === 'map') {
+                    switchMarkerTopicIfNeeded()
+                }
+            }
+        })
+    } catch (error) {
+        console.error('订阅当前地图话题失败:', error)
+    }
+}
+
+/*
+// 自动趴下逻辑已停用：手动点击“停止”不再让机器狗趴下。
+// 如后续需要恢复任务停止后自动趴下：
+// 1. 取消注释 subscribeToQueueStop 和 handleStopQueue。
+// 2. 取消注释 ROS 连接成功 / onMounted 中的 subscribeToQueueStop()。
+// 3. 取消注释 onUnmounted 中的 unsubscribe。
 const subscribeToQueueStop = async () => {
     if (!rosConnection.isConnected()) return
 
     try {
-        rosConnection.unsubscribe('/goal_queue/stop')
+        rosConnection.unsubscribe('/goal_queue/stop', 'three-d-panel-queue-stop')
 
         await rosConnection.subscribe({
             topic: '/goal_queue/stop',
+            key: 'three-d-panel-queue-stop',
             messageType: 'std_msgs/Empty',
             callback: () => {
                 handleStopQueue()
@@ -470,6 +883,7 @@ const handleStopQueue = async () => {
         }
     }, 2000)
 }
+*/
 
 // 清理marker对象的辅助函数
 const disposeMarkerObject = (obj: THREE.Object3D) => {
@@ -525,14 +939,7 @@ const handleMarkersMessage = (message: any) => {
         // 如果有DELETEALL或需要清理，先移除旧的markers
         // 注意：即使没有DELETEALL，如果收到新的标记数组，也应该清除旧的（因为后端会重新发布所有标记）
         if (hasDeleteAll || markerObjects.length > 0) {
-            markerObjects.forEach(obj => {
-                scene.remove(obj)
-                disposeMarkerObject(obj)
-            })
-            markerObjects = []
-            // 同时清理文本sprite引用
-            textSprites = []
-
+            clearMarkers()
         }
 
         // 如果只有DELETEALL，直接返回
@@ -857,7 +1264,12 @@ const createDefaultMarker = (marker: any, pos: any): THREE.Object3D => {
 }
 
 // 调整相机以适应地图
-const fitCameraToMap = (mapData: any) => {
+const fitCameraToMap = (mapData: any): boolean => {
+    if (!isThreeReady || !camera || !controls) {
+        console.warn('[Map] 跳过视角适配：Three.js 尚未初始化完成')
+        return false
+    }
+
     const { width, height, resolution, origin } = mapData.info
     const mapWidth = width * resolution
     const mapHeight = height * resolution
@@ -879,6 +1291,7 @@ const fitCameraToMap = (mapData: any) => {
 
     controls.target.set(centerX, centerY, 0)
     controls.update()
+    return true
 }
 
 // 适应地图到视图（供按钮调用）
@@ -887,8 +1300,11 @@ const fitMapToView = () => {
         ElMessage.warning('未加载地图数据')
         return
     }
-    fitCameraToMap(currentMapData)
-    ElMessage.success('视角已适应地图')
+    if (fitCameraToMap(currentMapData)) {
+        ElMessage.success('视角已适应地图')
+    } else {
+        ElMessage.warning('地图渲染器尚未就绪，请稍后重试')
+    }
 }
 
 // 初始化发布工具
@@ -993,7 +1409,13 @@ const handlePublishEvent = async (event: { type: PublishClickType; point?: any; 
     }
 
     try {
-        const frameId = 'map' // 使用地图坐标系
+        if (isCurrentMapPublishBlocked(event.type)) {
+            ElMessage.warning('多楼层模式下，请先切换到一楼或二楼地图后再发布目标点')
+            return
+        }
+
+        const publishMapLabel = getEffectivePublishMapLabel()
+        const frameId = FRAME_ID_BY_LABEL[publishMapLabel]
 
         // 准备坐标信息字符串
         let coordinateInfo = ''
@@ -1063,7 +1485,7 @@ const handlePublishEvent = async (event: { type: PublishClickType; point?: any; 
                 } else {
                     const message = makePoseMessage(event.pose, frameId)
                     await rosConnection.publish(
-                        settingsStore.publishPoseTopic,
+                        QUEUE_POSE_TOPIC_BY_LABEL[publishMapLabel],
                         'geometry_msgs/PoseStamped',
                         message
                     )
@@ -1108,6 +1530,11 @@ const handlePublishCommand = (command: PublishClickType) => {
 }
 
 const resetCamera = () => {
+    if (!isThreeReady || !camera || !controls) {
+        ElMessage.warning('地图渲染器尚未就绪')
+        return
+    }
+
     if (settingsStore.viewMode === '2d') {
         camera.position.set(0, 0, 20)
         camera.lookAt(0, 0, 0)
@@ -1136,37 +1563,72 @@ defineExpose({
 
 // 监听设置变化
 watch(() => settingsStore.backgroundColor, (color) => {
-    if (scene) {
+    if (isThreeReady) {
         scene.background = new THREE.Color(color)
     }
 })
 
+watch(() => settingsStore.selectedMapLabel, (label) => {
+    selectedMapLabel.value = label
+    if (isThreeReady) {
+        renderMapForLabel(getDisplayMapLabel())
+    }
+    switchMarkerTopicIfNeeded()
+})
+
+watch(() => settingsStore.multiFloorMapsReady, () => {
+    if (isThreeReady) {
+        renderMapForLabel(getDisplayMapLabel())
+    }
+    switchMarkerTopicIfNeeded()
+})
+
 // 监听ROS连接状态，连接成功后订阅话题
 watch(() => rosStore.isConnected, (connected) => {
-    if (connected && scene) {
+    if (connected && isThreeReady) {
         // 连接成功后订阅所有话题
         subscribeToMap()
         subscribeToFootprint()
         subscribeToPlan()
+        subscribeToCurrentMap()
         subscribeToMarkers()
-        subscribeToQueueStop()
+        // 自动趴下逻辑已停用。恢复时取消下一行注释：
+        // subscribeToQueueStop()
+    }
+    if (!connected) {
+        currentMarkerTopic = ''
+        currentMapLabel = 'map'
+        settingsStore.setActiveMapLabel('map')
+        hasFloorMarkerTopics = false
+        Object.keys(markerMessagesByTopic).forEach(topic => {
+            delete markerMessagesByTopic[topic]
+        })
+        clearMarkers()
     }
 }, { immediate: true })
 
-onMounted(() => {
-    initThreeJS()
+const initializeThreePanel = () => {
+    if (!initThreeJS()) return
 
-    // 如果此时ROS已经连接，立即订阅
-    if (rosStore.isConnected && scene) {
+    // 关键渲染对象完整就绪后才允许订阅，防止回调访问未创建的 controls。
+    if (rosStore.isConnected) {
         subscribeToMap()
         subscribeToFootprint()
         subscribeToPlan()
+        subscribeToCurrentMap()
         subscribeToMarkers()
-        subscribeToQueueStop()
+        // 自动趴下逻辑已停用。恢复时取消下一行注释：
+        // subscribeToQueueStop()
     }
+}
+
+onMounted(() => {
+    initializeThreePanel()
 })
 
 onUnmounted(() => {
+    isThreeReady = false
+
     // 清理定时器
     if (mapSubscriptionTimer) {
         clearInterval(mapSubscriptionTimer)
@@ -1175,7 +1637,9 @@ onUnmounted(() => {
 
     // 取消订阅地图话题
     if (rosConnection.isConnected()) {
-        rosConnection.unsubscribe('/map')
+        mapLabels.forEach(label => {
+            rosConnection.unsubscribe(MAP_TOPIC_BY_LABEL[label])
+        })
     }
 
     // 清理发布工具
@@ -1202,13 +1666,27 @@ onUnmounted(() => {
         clearTimeout(resizeTimeout)
         resizeTimeout = null
     }
+    if (resizeHandler) {
+        window.removeEventListener('resize', resizeHandler)
+        resizeHandler = null
+    }
 
     // 取消订阅
-    rosConnection.unsubscribe('/map')
+    mapLabels.forEach(label => {
+        rosConnection.unsubscribe(MAP_TOPIC_BY_LABEL[label])
+    })
     rosConnection.unsubscribe('/move_base/global_costmap/footprint')
     rosConnection.unsubscribe('/move_base/GlobalPlanner/plan')
-    rosConnection.unsubscribe('/goal_queue/markers')
-    rosConnection.unsubscribe('/goal_queue/stop')
+    rosConnection.unsubscribe('/map_manager/current_map')
+    markerTopics.forEach(topic => {
+        rosConnection.unsubscribe(topic)
+        delete markerMessagesByTopic[topic]
+    })
+    // 自动趴下逻辑已停用。恢复时取消下一行注释：
+    // rosConnection.unsubscribe('/goal_queue/stop', 'three-d-panel-queue-stop')
+    currentMarkerTopic = ''
+    hasFloorMarkerTopics = false
+    clearMarkers()
 
     // 清理footprint和plan
     if (footprintLine) {
@@ -1229,21 +1707,9 @@ onUnmounted(() => {
         planLine = null
     }
 
-    // 清理地图网格
-    if (mapMesh) {
-        if (mapMesh.geometry) {
-            mapMesh.geometry.dispose()
-        }
-        if (mapMesh.material) {
-            const material = mapMesh.material as THREE.MeshBasicMaterial
-            if (material.map) {
-                material.map.dispose()
-            }
-            material.dispose()
-        }
-        scene?.remove(mapMesh)
-        mapMesh = null
-    }
+    clearMapMesh()
+    disposeCachedMapMeshes()
+    settingsStore.setMultiFloorMapsReady(false)
 
     if (animationId) {
         cancelAnimationFrame(animationId)
@@ -1251,7 +1717,9 @@ onUnmounted(() => {
     if (renderer) {
         renderer.dispose()
     }
-    window.removeEventListener('resize', () => { })
+    if (controls) {
+        controls.dispose()
+    }
 })
 </script>
 
@@ -1269,11 +1737,86 @@ onUnmounted(() => {
     overflow: hidden;
 }
 
+.map-render-error {
+    position: absolute;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    color: #606266;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.94);
+}
+
 .map-controls {
     position: absolute;
     top: 12px;
     right: 12px;
     z-index: 100;
+}
+
+.map-floor-tabs {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 100;
+    padding: 4px;
+    background-color: rgba(255, 255, 255, 0.88);
+    border: 1px solid rgba(31, 41, 55, 0.08);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+    backdrop-filter: blur(10px);
+}
+
+.map-floor-tabs :deep(.map-floor-tabs-group) {
+    display: flex;
+    gap: 3px;
+}
+
+.map-floor-tabs :deep(.el-radio-button) {
+    --el-radio-button-checked-bg-color: #2563eb;
+    --el-radio-button-checked-border-color: #2563eb;
+    --el-radio-button-checked-text-color: #ffffff;
+}
+
+.map-floor-tabs :deep(.el-radio-button__inner) {
+    min-width: 48px;
+    height: 28px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 6px;
+    background-color: transparent;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 28px;
+    box-shadow: none;
+    transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.map-floor-tabs :deep(.el-radio-button:first-child .el-radio-button__inner),
+.map-floor-tabs :deep(.el-radio-button:last-child .el-radio-button__inner) {
+    border-radius: 6px;
+}
+
+.map-floor-tabs :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+    background-color: #2563eb;
+    color: #ffffff;
+    box-shadow: 0 3px 10px rgba(37, 99, 235, 0.28);
+}
+
+.map-floor-tabs :deep(.el-radio-button__inner:hover) {
+    color: #1d4ed8;
+    background-color: rgba(37, 99, 235, 0.08);
+}
+
+.map-floor-tabs :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner:hover) {
+    color: #ffffff;
+    background-color: #2563eb;
 }
 
 .map-controls .el-button {

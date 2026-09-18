@@ -1,9 +1,14 @@
 image/
+image2/
+animal-species/
 videos/
 maps/
 temp/
 node_modules/
-dist/
 .git/
 certs/
 deploy/
+release/
+src/
+public/
+docs/

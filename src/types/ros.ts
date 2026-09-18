@@ -17,6 +17,7 @@ export interface TopicSubscription {
   topic: string
   messageType: string
   callback: (message: RosMessage) => void
+  key?: string
   compression?: 'png' | 'cbor' | 'none'
   throttleRate?: number
 }
@@ -34,22 +35,10 @@ export interface RosConnectionState {
   url: string
 }
 
-export interface TTSReq {
-  text: string
-  voice: number // 0=男声, 1=女声
-  loop: boolean
-  volume: number // 0-100
-}
-
 export interface CommonResp {
   success: boolean
   message: string
   file_list?: string[]
-}
-
-export interface RecordAudioReq {
-  duration: number // 秒
-  enable_denoise: boolean
 }
 
 export interface RobotStatus {
@@ -68,12 +57,6 @@ export interface RobotStatus {
   battery_temp_bat1?: number
   battery_temp_bat2?: number
   [key: string]: any
-}
-
-export interface RecordAudioResp {
-  success: boolean
-  message: string
-  audio_file: string
 }
 
 export interface DeviceControlReq {

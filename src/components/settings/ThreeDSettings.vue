@@ -49,6 +49,14 @@
               </el-icon>
               导航系统运行中
             </div>
+            <div
+              v-if="settingsStore.multiFloorMapsReady && mapManagerCurrentMap"
+              class="map-manager-status"
+            >
+              <div v-if="mapManagerCurrentMap">
+                当前楼层：{{ mapManagerCurrentMap }}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -101,7 +109,7 @@
               <el-option
                 v-for="name in availableQueues"
                 :key="name"
-                :label="name"
+                :label="getQueueOptionLabel(name)"
                 :value="name"
               />
             </el-select>
@@ -295,6 +303,13 @@
                 <span style="color: #409eff; font-weight: 500;">{{ taskStatus.queueSize }}</span>
               </div>
               <div
+                v-if="settingsStore.multiFloorMapsReady"
+                style="display: flex; justify-content: space-between; margin-bottom: 4px;"
+              >
+                <span style="color: #606266;">一楼/二楼：</span>
+                <span style="color: #409eff; font-weight: 500;">{{ selectedQueueFloorSummary }}</span>
+              </div>
+              <div
                 v-if="taskStatus.isRunning"
                 style="display: flex; justify-content: space-between; margin-bottom: 4px;"
               >
@@ -327,6 +342,10 @@
 
           <div class="control-group-label">
             添加点位
+          </div>
+          <div class="map-target-summary">
+            <span>目标楼层</span>
+            <strong>{{ selectedMapText }}</strong>
           </div>
           <div class="button-grid">
             <el-button
@@ -640,6 +659,30 @@
 
         <div class="control-group">
           <div class="control-label">
+            控制来源
+          </div>
+          <div class="action-buttons">
+            <el-button
+              type="primary"
+              plain
+              style="flex: 1"
+              @click="switchControlMode('remote')"
+            >
+              遥控器控制
+            </el-button>
+            <el-button
+              type="success"
+              plain
+              style="flex: 1"
+              @click="switchControlMode('sdk')"
+            >
+              网页控制
+            </el-button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">
             姿态控制
           </div>
           <div class="action-buttons">
@@ -779,7 +822,7 @@
         >
           <el-input
             v-model="weatherCity"
-            placeholder="输入城市拼音 (如 Beijing)"
+            placeholder="输入城市名，如太原、北京或 Wuhan"
             style="flex: 1"
             @keyup.enter="fetchWeather"
           >
@@ -793,10 +836,10 @@
           <el-button
             type="success"
             plain
-            title="设为默认城市"
+            title="设为当前浏览器默认城市"
             @click="setDefaultCity"
           >
-            设为默认
+            设为本机默认
           </el-button>
         </div>
       </div>
@@ -854,7 +897,13 @@ import {
     Sunny
 } from '@element-plus/icons-vue'
 import { rosConnection } from '@/services/rosConnection'
-import { use3DSettingsStore } from '@/stores/threeDSettings'
+import {
+    FRAME_ID_BY_LABEL,
+    MAP_ID_BY_LABEL,
+    QUEUE_POSE_TOPIC_BY_LABEL,
+    use3DSettingsStore,
+    type MapLabel
+} from '@/stores/threeDSettings'
 import { useRosStore } from '@/stores/ros'
 import type { PublishClickType } from '@/utils/PublishClickTool'
 import { API_BASE_URL } from '@/config'
@@ -868,18 +917,54 @@ const queueName = ref('')
 const imagePanelRef = inject<any>('imagePanelRef', null)
 
 // Image Capture Logic
+const CAPTURE_INTERVAL_MS = 10000
 const captureTimer = ref<number | null>(null)
+const isCaptureUploading = ref(false)
+
+const startBackendImageCapture = async () => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/image-capture/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ robotUrl: rosStore.connectionState.url })
+        })
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`)
+        }
+    } catch (error) {
+        console.error('Backend image capture start failed:', error)
+    }
+}
+
+const stopBackendImageCapture = async () => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/image-capture/stop`, {
+            method: 'POST'
+        })
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`)
+        }
+    } catch (error) {
+        console.error('Backend image capture stop failed:', error)
+    }
+}
 
 const startImageCapture = () => {
+    startBackendImageCapture()
     if (captureTimer.value) return
 
     console.log('Starting image capture...')
+    captureAndUploadImage()
     captureTimer.value = window.setInterval(() => {
         captureAndUploadImage()
-    }, 10000)
+    }, CAPTURE_INTERVAL_MS)
 }
 
 const stopImageCapture = () => {
+    stopBackendImageCapture()
+
     if (captureTimer.value) {
         console.log('Stopping image capture...')
         clearInterval(captureTimer.value)
@@ -887,7 +972,15 @@ const stopImageCapture = () => {
     }
 }
 
-const captureAndUploadImage = () => {
+const captureCanvasBlob = (canvas: HTMLCanvasElement): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.8)
+    })
+}
+
+const captureAndUploadImage = async () => {
+    if (isCaptureUploading.value) return
+
     if (!imagePanelRef?.value) {
         console.warn('ImagePanel ref not found')
         return
@@ -899,25 +992,33 @@ const captureAndUploadImage = () => {
         return
     }
 
-    canvas.toBlob(async (blob) => {
-        if (blob) {
-            const formData = new FormData()
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-            const fileName = `img_${timestamp}.jpg`
-            formData.append('image', blob, fileName)
-            formData.append('folderName', 'check')
+    isCaptureUploading.value = true
 
-            try {
-                await fetch(`${API_BASE_URL}/images/upload`, {
-                    method: 'POST',
-                    body: formData
-                })
-                // console.log('Image uploaded:', fileName)
-            } catch (e) {
-                console.error('Image upload failed:', e)
-            }
+    try {
+        const blob = await captureCanvasBlob(canvas)
+        if (!blob) return
+
+        const formData = new FormData()
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+        const fileName = `img_${timestamp}.jpg`
+        formData.append('image', blob, fileName)
+        formData.append('folderName', 'check')
+        formData.append('sourceUrl', rosStore.connectionState.url)
+
+        const response = await fetch(`${API_BASE_URL}/images/upload`, {
+            method: 'POST',
+            body: formData
+        })
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`)
         }
-    }, 'image/jpeg', 0.8)
+        // console.log('Image uploaded:', fileName)
+    } catch (e) {
+        console.error('Image upload failed:', e)
+    } finally {
+        isCaptureUploading.value = false
+    }
 }
 
 // 电池安全设置
@@ -937,6 +1038,14 @@ const isLowBattery = computed(() => {
 // 计算属性：检查是否已连接
 const isConnected = computed(() => rosStore.connectionState.connected)
 const availableQueues = ref<string[]>([])
+type QueueInfo = {
+    name: string
+    points: number
+    floor1_points: number
+    floor2_points: number
+    stamp?: number
+}
+const queueInfos = ref<Record<string, QueueInfo>>({})
 const publishType = ref<PublishClickType>('pose')
 const isRefreshingList = ref(false)
 
@@ -952,6 +1061,49 @@ const taskStatus = ref({
     currentLoop: 0,
     isRunning: false
 })
+
+const mapManagerStatusText = ref('')
+const mapManagerResultText = ref('')
+
+const selectedMapText = computed(() => {
+    if (!settingsStore.multiFloorMapsReady) {
+        return '当前地图（旧版）'
+    }
+
+    const textMap: Record<MapLabel, string> = {
+        floor1: '一楼',
+        floor2: '二楼',
+        map: '当前地图（仅查看）'
+    }
+    return textMap[settingsStore.selectedMapLabel]
+})
+
+const selectedQueueFloorSummary = computed(() => {
+    const info = queueName.value ? queueInfos.value[queueName.value] : null
+    if (!info) return '一楼 0 / 二楼 0'
+    return `一楼 ${info.floor1_points || 0} / 二楼 ${info.floor2_points || 0}`
+})
+
+const getQueueOptionLabel = (name: string) => {
+    const info = queueInfos.value[name]
+    if (!info) return name
+    if (!settingsStore.multiFloorMapsReady) {
+        return `${name}  总${info.points || 0}`
+    }
+    return `${name}  总${info.points || 0} / 一楼${info.floor1_points || 0} / 二楼${info.floor2_points || 0}`
+}
+
+const getSelectedMapMeta = () => {
+    const mapLabel = settingsStore.multiFloorMapsReady ? settingsStore.selectedMapLabel : 'map'
+    return {
+        map_label: mapLabel,
+        map_id: MAP_ID_BY_LABEL[mapLabel],
+        frame_id: FRAME_ID_BY_LABEL[mapLabel],
+        queueTopic: QUEUE_POSE_TOPIC_BY_LABEL[mapLabel],
+        multiFloorReady: settingsStore.multiFloorMapsReady,
+        canPublishFloorTarget: !settingsStore.multiFloorMapsReady || mapLabel !== 'map'
+    }
+}
 
 // 定时启动状态 - 废弃的前端定时器状态已移除
 const showTimePickerDialog = ref(false) // 显示时间选择对话框
@@ -990,10 +1142,12 @@ onMounted(async () => {
 })
 
 const setDefaultCity = async () => {
-    if (!weatherCity.value) return
+    const city = weatherCity.value.trim()
+    if (!city) return
     try {
-        await weatherService.updateConfig(weatherCity.value)
-        ElMessage.success(`已将 ${weatherCity.value} 设为默认城市`)
+        weatherCity.value = city
+        weatherService.setDefaultCity(city)
+        ElMessage.success(`已在当前浏览器中将 ${city} 设为默认城市`)
     } catch (e) {
         ElMessage.error('设置默认城市失败')
     }
@@ -1017,7 +1171,8 @@ const rainInfo = computed(() => {
     if (weatherData.value.weather && weatherData.value.weather[0] && weatherData.value.weather[0].hourly) {
         const hourly = weatherData.value.weather[0].hourly
         // Calculate max rain chance
-        maxChance = Math.max(...hourly.map((h: any) => parseInt(h.chanceofrain)))
+        const rainChances = hourly.map((h: any) => parseInt(h.chanceofrain)).filter(Number.isFinite)
+        maxChance = rainChances.length > 0 ? Math.max(...rainChances) : 0
         
         // Get next few hours forecast
         const currentHour = new Date().getHours() * 100
@@ -1055,12 +1210,19 @@ const weatherDesc = computed(() => {
 })
 
 const fetchWeather = async () => {
+    const city = weatherCity.value.trim()
+    if (!city) {
+        ElMessage.warning('请输入城市名')
+        return
+    }
+
+    weatherCity.value = city
     weatherLoading.value = true
     weatherError.value = ''
     weatherData.value = null
     try {
         // Use local backend proxy with caching
-        const response = await fetch(`${API_BASE_URL}/weather?city=${weatherCity.value}`)
+        const response = await fetch(`${API_BASE_URL}/weather?city=${encodeURIComponent(city)}`)
         if (!response.ok) {
             throw new Error('获取天气失败')
         }
@@ -1205,6 +1367,19 @@ const switchMode = async (mode: string) => {
     }
 }
 
+const switchControlMode = async (mode: 'remote' | 'sdk') => {
+    if (!isConnected.value) return
+
+    try {
+        await rosConnection.publish('/dog/control_mode', 'std_msgs/String', { data: mode })
+        const modeText = mode === 'remote' ? '遥控器控制' : 'Jetson SDK控制'
+        ElMessage.success(`已切换到${modeText}`)
+    } catch (error) {
+        console.error('Failed to publish dog control mode command:', error)
+        ElMessage.error('切换控制来源失败')
+    }
+}
+
 // 获取3D面板的引用
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const threeDPanelRef = inject<Ref<any>>('threeDPanelRef', ref(null))
@@ -1323,10 +1498,11 @@ const subscribeToNavigationStatus = async () => {
                         return
                     }
 
-                    // 解析状态字符串，格式: "status:running,pid:123,package:xxx,file:xxx" 或 "status:stopped,package:xxx,file:xxx"
-                    if (statusString.includes('status:running')) {
+                    const normalizedStatus = statusString.trim().toLowerCase()
+                    // 兼容新格式 "running/stopped" 和旧格式 "status:running/status:stopped"
+                    if (normalizedStatus === 'running' || normalizedStatus.includes('status:running')) {
                         isNavigationRunning.value = true
-                    } else if (statusString.includes('status:stopped')) {
+                    } else if (normalizedStatus === 'stopped' || normalizedStatus.includes('status:stopped')) {
                         isNavigationRunning.value = false
                     }
                 } catch (error) {
@@ -1336,6 +1512,92 @@ const subscribeToNavigationStatus = async () => {
         })
     } catch (error) {
         console.error('订阅导航状态话题失败:', error)
+    }
+}
+
+const parseStringMessage = (message: any): string => {
+    if (typeof message === 'string') {
+        return message
+    }
+    if (message?.data && typeof message.data === 'string') {
+        return message.data
+    }
+    return ''
+}
+
+const formatMapLabel = (value: string) => {
+    const labelMap: Record<string, string> = {
+        floor1: '一楼',
+        floor2: '二楼',
+        map: '当前地图',
+        map1: '一楼',
+        map2: '二楼'
+    }
+    return labelMap[value.trim()] || value
+}
+
+const mapManagerCurrentMap = computed(() => {
+    return settingsStore.activeMapLabel === 'map' ? '' : formatMapLabel(settingsStore.activeMapLabel)
+})
+
+const formatStatusWord = (value: string) => {
+    const statusMap: Record<string, string> = {
+        IDLE: '空闲',
+        idle: '空闲',
+        ready: '就绪',
+        READY: '就绪',
+        running: '运行中',
+        RUNNING: '运行中',
+        stopped: '已停止',
+        STOPPED: '已停止',
+        succeeded: '成功',
+        SUCCEEDED: '成功',
+        failed: '失败',
+        FAILED: '失败'
+    }
+    return statusMap[value] || value
+}
+
+const formatJsonStatus = (text: string) => {
+    if (!text) return ''
+
+    try {
+        const data = JSON.parse(text)
+        const parts = [
+            data.state || data.status ? formatStatusWord(data.state || data.status) : '',
+            data.message,
+            data.current_map ? `当前 ${formatMapLabel(data.current_map)}` : '',
+            data.target_map ? `目标 ${formatMapLabel(data.target_map)}` : ''
+        ].filter(Boolean)
+        return parts.length > 0 ? parts.join('，') : text
+    } catch {
+        return formatStatusWord(formatMapLabel(text))
+    }
+}
+
+const subscribeToMapManagerStatus = async () => {
+    if (!rosConnection.isConnected()) {
+        return
+    }
+
+    try {
+        await rosConnection.subscribe({
+            topic: '/map_manager/status',
+            messageType: 'std_msgs/String',
+            callback: (message: any) => {
+                mapManagerStatusText.value = formatJsonStatus(parseStringMessage(message))
+            }
+        })
+
+        await rosConnection.subscribe({
+            topic: '/map_manager/result',
+            messageType: 'std_msgs/String',
+            callback: (message: any) => {
+                mapManagerResultText.value = formatJsonStatus(parseStringMessage(message))
+            }
+        })
+    } catch (error) {
+        console.error('订阅 map_manager 状态失败:', error)
     }
 }
 
@@ -1374,20 +1636,34 @@ const handleLoadQueue = async () => {
     // 加载队列后不再自动刷新列表，用户需要手动点击刷新按钮
 }
 
+const parseQueuePointNumber = (value: string) => {
+    const trimmed = value.trim()
+    const match = trimmed.match(/^(?:[12]-)?([1-9]\d*)$/)
+    if (!match) {
+        return null
+    }
+    return parseInt(match[1], 10)
+}
+
 // 处理修改点
 const handleModifyPoint = async () => {
     try {
-        const { value } = await ElMessageBox.prompt('请输入要修改的点索引 (从1开始)', '修改点', {
+        const { value } = await ElMessageBox.prompt('请输入要修改的全局点号，可输入 3 或 1-3 / 2-3', '修改点', {
             confirmButtonText: '确定',
             cancelButtonText: '取消',
-            inputPattern: /^[1-9]\d*$/,
-            inputErrorMessage: '请输入有效的正整数'
+            inputPattern: /^(?:[12]-)?[1-9]\d*$/,
+            inputErrorMessage: '请输入有效点号，例如 3、1-3 或 2-4'
         })
 
         if (value) {
-            const index = parseInt(value) - 1
+            const pointNumber = parseQueuePointNumber(value)
+            if (!pointNumber) {
+                ElMessage.warning('请输入有效点号')
+                return
+            }
+            const index = pointNumber - 1
 
-            ElMessage.info(`请在地图上点击新的位置以修改点 #${value}`)
+            ElMessage.info(`请在地图上点击新的位置以修改全局点 #${pointNumber}`)
 
             // 激活修改模式
             if (threeDPanelRef.value?.handlePublishCommand) {
@@ -1414,15 +1690,20 @@ const startModifyPoint = (index: number) => {
 // 处理插入点
 const handleInsertPoint = async () => {
     try {
-        const { value } = await ElMessageBox.prompt('请输入插入位置的索引 (从1开始，插入到该点之前)', '插入点', {
+        const { value } = await ElMessageBox.prompt('请输入插入位置的全局点号，可输入 3 或 1-3 / 2-3（插入到该点之前）', '插入点', {
             confirmButtonText: '确定',
             cancelButtonText: '取消',
-            inputPattern: /^[1-9]\d*$/,
-            inputErrorMessage: '请输入有效的正整数'
+            inputPattern: /^(?:[12]-)?[1-9]\d*$/,
+            inputErrorMessage: '请输入有效点号，例如 3、1-3 或 2-4'
         })
 
         if (value) {
-            const index = parseInt(value) - 1
+            const pointNumber = parseQueuePointNumber(value)
+            if (!pointNumber) {
+                ElMessage.warning('请输入有效点号')
+                return
+            }
+            const index = pointNumber - 1
             startInsertPoint(index)
         }
     } catch (error) {
@@ -1445,18 +1726,22 @@ const startInsertPoint = (index: number) => {
 // 处理删除点
 const handleDeletePoint = async () => {
     try {
-        const { value } = await ElMessageBox.prompt('请输入要删除的点索引 (从1开始)', '删除点', {
+        const { value } = await ElMessageBox.prompt('请输入要删除的全局点号，可输入 3 或 1-3 / 2-3', '删除点', {
             confirmButtonText: '删除',
             cancelButtonText: '取消',
-            inputPattern: /^[1-9]\d*$/,
-            inputErrorMessage: '请输入有效的正整数',
-            inputType: 'number'
+            inputPattern: /^(?:[12]-)?[1-9]\d*$/,
+            inputErrorMessage: '请输入有效点号，例如 3、1-3 或 2-4'
         })
 
         if (value) {
-            const index = parseInt(value) - 1
+            const pointNumber = parseQueuePointNumber(value)
+            if (!pointNumber) {
+                ElMessage.warning('请输入有效点号')
+                return
+            }
+            const index = pointNumber - 1
             await rosConnection.publish('/goal_queue/delete_point', 'std_msgs/Int32', { data: index })
-            ElMessage.success(`已删除点 #${value}`)
+            ElMessage.success(`已删除全局点 #${pointNumber}`)
         }
     } catch (error) {
         // 用户取消
@@ -1643,6 +1928,7 @@ const subscribeToCommandTopics = async () => {
         
         await rosConnection.subscribe({
             topic: '/goal_queue/stop',
+            key: 'three-d-settings-image-capture-stop',
             messageType: 'std_msgs/Empty',
             callback: () => {
                 console.log('Received stop command from topic')
@@ -1686,7 +1972,7 @@ const subscribeToQueueList = async () => {
 
                     if (data.queues && Array.isArray(data.queues)) {
                         const queues: string[] = []
-                        const queueInfoMap = new Map<string, number>()
+                        const nextQueueInfos: Record<string, QueueInfo> = {}
 
                         for (const queueInfo of data.queues) {
                             if (queueInfo.name && typeof queueInfo.name === 'string') {
@@ -1694,22 +1980,31 @@ const subscribeToQueueList = async () => {
                                 const pointCount = queueInfo.points || 0
                                 if (queueName) {
                                     queues.push(queueName)
-                                    queueInfoMap.set(queueName, pointCount)
+                                    nextQueueInfos[queueName] = {
+                                        name: queueName,
+                                        points: pointCount,
+                                        floor1_points: queueInfo.floor1_points || 0,
+                                        floor2_points: queueInfo.floor2_points || 0,
+                                        stamp: queueInfo.stamp
+                                    }
                                 }
                             }
                         }
 
                         if (queues.length > 0) {
                             availableQueues.value = queues
+                            queueInfos.value = nextQueueInfos
                             // 如果当前选中的队列在列表中，更新队列大小
-                            if (queueName.value && queueInfoMap.has(queueName.value)) {
-                                taskStatus.value.queueSize = queueInfoMap.get(queueName.value) || 0
+                            if (queueName.value && nextQueueInfos[queueName.value]) {
+                                taskStatus.value.queueSize = nextQueueInfos[queueName.value].points || 0
                             }
                         } else {
                             availableQueues.value = []
+                            queueInfos.value = {}
                         }
                     } else {
                         availableQueues.value = []
+                        queueInfos.value = {}
                     }
                 } catch (error) {
                     console.error('Failed to parse queue list message:', error)
@@ -1786,12 +2081,18 @@ watch(isNavigationRunning, (newValue, oldValue) => {
     }
 })
 
+watch(queueName, (name) => {
+    const info = name ? queueInfos.value[name] : null
+    taskStatus.value.queueSize = info?.points || 0
+})
+
 // 监听 ROS 连接状态，连接成功后订阅导航状态话题和任务状态
 watch(() => rosStore.isConnected, (connected) => {
     if (connected) {
         // 延迟订阅，等待话题列表更新
         setTimeout(() => {
             subscribeToNavigationStatus()
+            subscribeToMapManagerStatus()
             subscribeToTaskStatus()
             subscribeToCommandTopics()
             // 自动订阅队列列表（后端会定期发布，使用 latch=true）
@@ -1800,9 +2101,11 @@ watch(() => rosStore.isConnected, (connected) => {
     } else {
         // 断开连接时取消订阅
         rosConnection.unsubscribe('/launch_trigger_status')
+        rosConnection.unsubscribe('/map_manager/status')
+        rosConnection.unsubscribe('/map_manager/result')
         rosConnection.unsubscribe('/goal_queue/list')
         rosConnection.unsubscribe('/goal_queue/start')
-        rosConnection.unsubscribe('/goal_queue/stop')
+        rosConnection.unsubscribe('/goal_queue/stop', 'three-d-settings-image-capture-stop')
         if (queueListSubscription) {
             queueListSubscription = null
         }
@@ -1815,6 +2118,9 @@ watch(() => rosStore.isConnected, (connected) => {
             isRunning: false
         }
         availableQueues.value = []
+        queueInfos.value = {}
+        mapManagerStatusText.value = ''
+        mapManagerResultText.value = ''
     }
 }, { immediate: true })
 
@@ -1828,6 +2134,7 @@ onMounted(() => {
     if (rosStore.isConnected) {
         setTimeout(() => {
             subscribeToNavigationStatus()
+            subscribeToMapManagerStatus()
             subscribeToTaskStatus()
             subscribeToCommandTopics()
             // 设置默认循环模式为单次执行（0）
@@ -1851,8 +2158,10 @@ onUnmounted(() => {
 
     // 清理订阅
     rosConnection.unsubscribe('/launch_trigger_status')
+    rosConnection.unsubscribe('/map_manager/status')
+    rosConnection.unsubscribe('/map_manager/result')
     rosConnection.unsubscribe('/goal_queue/start')
-    rosConnection.unsubscribe('/goal_queue/stop')
+    rosConnection.unsubscribe('/goal_queue/stop', 'three-d-settings-image-capture-stop')
 
     // 注意：不清理定时启动定时器，因为使用了 keep-alive，组件状态会被保持
     // 定时器会继续运行，即使切换面板也不会被清理
@@ -1860,6 +2169,13 @@ onUnmounted(() => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const handlePosePublished = async (pose: any) => {
+    const mapMeta = getSelectedMapMeta()
+
+    if (!mapMeta.canPublishFloorTarget) {
+        ElMessage.warning('多楼层模式下，请先切换到一楼或二楼地图后再发布目标点')
+        return
+    }
+
     if (isModifying.value) {
         // 构造修改消息
         const data = {
@@ -1871,6 +2187,13 @@ const handlePosePublished = async (pose: any) => {
             qy: pose.orientation.y,
             qz: pose.orientation.z,
             qw: pose.orientation.w
+        }
+
+        if (mapMeta.multiFloorReady) {
+            Object.assign(data, {
+                map_label: mapMeta.map_label,
+                map_id: mapMeta.map_id
+            })
         }
 
         try {
@@ -1892,7 +2215,15 @@ const handlePosePublished = async (pose: any) => {
             qx: pose.orientation.x,
             qy: pose.orientation.y,
             qz: pose.orientation.z,
-            qw: pose.orientation.w
+            qw: pose.orientation.w,
+            record: 0
+        }
+
+        if (mapMeta.multiFloorReady) {
+            Object.assign(data, {
+                map_label: mapMeta.map_label,
+                map_id: mapMeta.map_id
+            })
         }
 
         try {
@@ -1906,14 +2237,13 @@ const handlePosePublished = async (pose: any) => {
         }
     } else {
         // 正常发布
-        const frameId = 'map'
         // 构造 geometry_msgs/PoseStamped 消息
         // 对应 Python 文件: cb_add_pose 接收 msg.pose.position 和 msg.pose.orientation
         // 或 cb_modify_point / cb_insert_point 处理修改/插入操作
         const now = new Date()
         const message = {
             header: {
-                frame_id: frameId,
+                frame_id: mapMeta.frame_id,
                 stamp: {
                     sec: Math.floor(now.getTime() / 1000),
                     nsec: (now.getTime() % 1000) * 1000000
@@ -1936,7 +2266,7 @@ const handlePosePublished = async (pose: any) => {
 
         try {
             await rosConnection.publish(
-                settingsStore.publishPoseTopic, // '/goal_queue/add_pose'
+                mapMeta.queueTopic,
                 'geometry_msgs/PoseStamped',
                 message
             )
@@ -1960,6 +2290,35 @@ onUnmounted(() => {
 
 .settings-content {
     padding: 12px;
+}
+
+.map-manager-status {
+    margin-top: 8px;
+    padding: 8px;
+    background-color: #f5f7fa;
+    border-radius: 4px;
+    color: #606266;
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.map-target-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background-color: #f5f7fa;
+    color: #606266;
+    font-size: 12px;
+}
+
+.map-target-summary strong {
+    color: #409eff;
+    font-weight: 600;
 }
 
 .control-panel {

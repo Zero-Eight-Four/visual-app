@@ -51,9 +51,6 @@
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="音量">
-          <el-slider v-model="ttsForm.volume" />
-        </el-form-item>
         <el-form-item>
           <el-button
             type="primary"
@@ -135,8 +132,7 @@ const rosStore = useRosStore()
 const ttsForm = ref({
     text: '',
     voice: 0,
-    loop: false,
-    volume: 80
+    loop: false
 })
 
 const sendTTS = () => {
@@ -147,8 +143,7 @@ const sendTTS = () => {
     voiceStore.bridgeTTS(
         ttsForm.value.text,
         ttsForm.value.voice,
-        ttsForm.value.loop,
-        ttsForm.value.volume
+        ttsForm.value.loop
     )
 }
 

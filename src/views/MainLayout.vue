@@ -4,7 +4,13 @@
     <div class="top-bar">
       <ConnectionStatus />
       <div class="title">
-        机器狗控制平台
+        <img
+          :src="appLogoUrl"
+          alt="机器狗控制平台"
+          class="app-logo"
+        >
+        <span class="app-title-divider" aria-hidden="true"></span>
+        <span class="app-title-text">机器狗控制平台</span>
       </div>
       <TopicSelector />
     </div>
@@ -38,8 +44,6 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, h } from 'vue'
-import { ElNotification } from 'element-plus'
 import ConnectionStatus from '@/components/ConnectionStatus.vue'
 import TopicSelector from '@/components/TopicSelector.vue'
 import ThreeDViewer from '@/components/ThreeDViewer.vue'
@@ -47,45 +51,8 @@ import ImageViewer from '@/components/ImageViewer.vue'
 import StateInfo from '@/components/StateInfo.vue'
 import TopicPublisher from '@/components/TopicPublisher.vue'
 
-onMounted(() => {
-    const eventSource = new EventSource('/api/events')
-    
-    eventSource.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data)
-            // Ignore initial connection message
-            if (data.type === 'connected') return
-
-            // Construct message content (support image)
-            const messageContent = data.imageUrl ? h('div', null, [
-                h('img', { 
-                    src: data.imageUrl, 
-                    style: 'width: 100%; max-height: 200px; object-fit: contain; margin-bottom: 8px; border-radius: 4px; display: block;' 
-                }),
-                h('div', { style: 'word-break: break-all;' }, data.message || '')
-            ]) : (data.message || JSON.stringify(data))
-
-            ElNotification({
-                title: data.title || '系统通知',
-                message: messageContent,
-                type: data.type || 'info',
-                duration: data.duration || 4500,
-                position: 'top-right'
-            })
-        } catch (e) {
-            console.error('Failed to parse notification:', e)
-        }
-    }
-
-    eventSource.onerror = (error) => {
-        console.error('SSE Error:', error)
-        // Do not close, let EventSource attempt to reconnect
-    }
-
-    onUnmounted(() => {
-        eventSource.close()
-    })
-})
+const appLogoFile = import.meta.env.VITE_APP_LOGO || 'logo-placeholder.png'
+const appLogoUrl = `${import.meta.env.BASE_URL}${appLogoFile}`
 </script>
 
 <style scoped>
@@ -98,7 +65,7 @@ onMounted(() => {
 }
 
 .top-bar {
-    height: 50px;
+    height: 56px;
     background-color: #252525;
     border-bottom: 1px solid #3a3a3a;
     display: flex;
@@ -110,10 +77,37 @@ onMounted(() => {
 }
 
 .title {
-    font-size: 18px;
-    font-weight: 600;
-    color: #fff;
     flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.app-logo {
+    display: block;
+    width: auto;
+    height: 32px;
+    max-width: 240px;
+    object-fit: contain;
+}
+
+.app-title-divider {
+    width: 2px;
+    height: 18px;
+    flex: 0 0 auto;
+    background-color: #6D6D6D;
+}
+
+.app-title-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    color: #404040;
+    font-family: var(--app-font-family);
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
 }
 
 .content-area {
