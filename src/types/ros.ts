@@ -31,6 +31,7 @@ export interface ServiceRequest {
 export interface RosConnectionState {
   connected: boolean
   connecting: boolean
+  reconnecting?: boolean
   error: string | null
   url: string
 }

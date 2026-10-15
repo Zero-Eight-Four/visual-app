@@ -17,7 +17,15 @@ const POLL_INTERVAL_MS = 2000
 const SSE_CONNECT_TIMEOUT_MS = 3000
 
 const handleConnectionChange = (connected: boolean) => {
-    rosStore.setConnectionState({ connected })
+    const wasReconnecting = rosStore.connectionState.reconnecting
+    const reconnecting = rosConnection.isReconnecting()
+    rosStore.setConnectionState({
+        connected,
+        connecting: reconnecting,
+        reconnecting,
+        ...(connected ? { error: null } : {})
+    })
+    if (connected && wasReconnecting) void rosStore.fetchTopics()
 }
 
 let eventSource: EventSource | null = null

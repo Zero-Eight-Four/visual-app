@@ -15,6 +15,7 @@ export const useRosStore = defineStore('ros', () => {
   const topics = ref<RosTopic[]>([])
   const loadingTopics = ref(false)
   const topicFetchError = ref<string | null>(null)
+  let topicRequestVersion = 0
   const selectedImageTopic = ref<string>('')
   const selectedStateTopic = ref<string>('')
   const robotStatus = ref<RobotStatus | null>(null)
@@ -35,6 +36,11 @@ export const useRosStore = defineStore('ros', () => {
 
   // Actions
   function setConnectionState(state: Partial<RosConnectionState>) {
+    if (state.connected === false || (state.url !== undefined && state.url !== connectionState.value.url)) {
+      ++topicRequestVersion
+      loadingTopics.value = false
+      topicFetchError.value = null
+    }
     connectionState.value = { ...connectionState.value, ...state }
   }
 
@@ -81,17 +87,19 @@ export const useRosStore = defineStore('ros', () => {
   async function fetchTopics() {
     if (!connectionState.value.connected) return
 
+    const version = ++topicRequestVersion
     loadingTopics.value = true
     topicFetchError.value = null
     try {
       const fetchedTopics = await rosConnection.getTopics(3, 10000) // 重试3次，每次10秒
-      topics.value = fetchedTopics
+      if (version === topicRequestVersion) topics.value = fetchedTopics
     } catch (error) {
+      if (version !== topicRequestVersion) return
       console.error('[RosStore] Fetch topics failed:', error)
       topicFetchError.value = error instanceof Error ? error.message : String(error)
       // 即使失败，也不要清空话题，保留上次的结果（如果有）
     } finally {
-      loadingTopics.value = false
+      if (version === topicRequestVersion) loadingTopics.value = false
     }
   }
 

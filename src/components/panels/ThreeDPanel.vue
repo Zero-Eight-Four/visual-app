@@ -358,6 +358,7 @@ const subscribeToMap = async () => {
         hasReceivedMapData = false
 
         await Promise.all(mapLabels.map(label => subscribeToMapTopic(label)))
+        if (!isThreeReady) return
 
         // 启动定期检查机制：如果10秒内没有收到数据，重新订阅
         if (mapSubscriptionTimer) {
@@ -1029,16 +1030,18 @@ const createShapeMarker = (marker: any, pos: any, orient: any): THREE.Object3D =
     let geometry: THREE.BufferGeometry
 
     switch (marker.type) {
-        case 2: // SPHERE
+        case 2: { // SPHERE
             const radius = marker.scale ? marker.scale.x / 2 : 0.1
             geometry = new THREE.SphereGeometry(radius, 16, 16)
             break
-        case 1: // CUBE
+        }
+        case 1: { // CUBE
             const sx = marker.scale?.x || 0.1
             const sy = marker.scale?.y || 0.1
             const sz = marker.scale?.z || 0.1
             geometry = new THREE.BoxGeometry(sx, sy, sz)
             break
+        }
         default:
             geometry = new THREE.SphereGeometry(0.1, 16, 16)
     }
@@ -1584,7 +1587,7 @@ watch(() => settingsStore.multiFloorMapsReady, () => {
 })
 
 // 监听ROS连接状态，连接成功后订阅话题
-watch(() => rosStore.isConnected, (connected) => {
+watch([() => rosStore.isConnected, () => rosStore.connectionState.reconnecting], ([connected]) => {
     if (connected && isThreeReady) {
         // 连接成功后订阅所有话题
         subscribeToMap()
@@ -1595,7 +1598,7 @@ watch(() => rosStore.isConnected, (connected) => {
         // 自动趴下逻辑已停用。恢复时取消下一行注释：
         // subscribeToQueueStop()
     }
-    if (!connected) {
+    if (!connected && !rosConnection.isReconnecting()) {
         currentMarkerTopic = ''
         currentMapLabel = 'map'
         settingsStore.setActiveMapLabel('map')

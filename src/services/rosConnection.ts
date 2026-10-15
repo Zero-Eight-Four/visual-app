@@ -10,6 +10,7 @@ let ROSLIB: any = null
 
 type SubscriberEntry = {
   listener: any
+  config: TopicSubscription
   callbacks: Map<string, (message: RosMessage) => void>
 }
 
@@ -20,7 +21,7 @@ async function loadRoslib(retries = 3): Promise<any> {
 
   for (let i = 0; i < retries; i++) {
     try {
-      // @ts-ignore
+      // @ts-expect-error ROSLIB 1.x does not ship TypeScript declarations.
       const module = await import('roslib')
       // 处理 ES Module 和 CommonJS 的兼容性
       // 优先使用 default 导出，如果它包含 Ros 类
@@ -57,376 +58,326 @@ async function loadRoslib(retries = 3): Promise<any> {
 class RosConnection {
   private ros: any = null
   private subscribers = new Map<string, SubscriberEntry>()
+  private debugSubscribers = new Set<SubscriberEntry>()
   private publishers = new Map<string, any>()
+  private pendingRequests = new Set<() => void>()
   private connectionCallbacks: ((connected: boolean) => void)[] = []
   private disconnectCallbacks: (() => void)[] = []
-  private intentionalDisconnect = false
-  private heartbeatTimer: any = null
+  private config: ConnectionConfig | null = null
+  private generation = 0
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempt = 0
+  private reconnecting = false
+  private cancelAttempt: (() => void) | null = null
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null
+  private cancelProbe: (() => void) | null = null
   private heartbeatFailCount = 0
-  private heartbeatPaused = false // 心跳是否暂停
-  private readonly HEARTBEAT_INTERVAL = 10000 // 10秒心跳（增加间隔，减少频率）
-  private readonly HEARTBEAT_TIMEOUT = 10000 // 10秒超时（增加超时时间）
-  private readonly MAX_HEARTBEAT_FAILURES = 10 // 10次失败（增加容错）
-  private readonly HEARTBEAT_START_DELAY = 5000 // 连接建立后延迟5秒再开始心跳
+  private heartbeatPaused = false
+  private lastReceivedAt: number | null = null
+  private readonly HEARTBEAT_INTERVAL = 15000
+  private readonly HEARTBEAT_TIMEOUT = 10000
+  private readonly MAX_HEARTBEAT_FAILURES = 3
 
   constructor() {
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          this.pauseHeartbeat()
-        } else {
-          this.resumeHeartbeat()
-        }
+        if (!document.hidden) this.checkNow()
       })
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => this.checkNow())
     }
   }
 
-  /**
-   * 连接到ROS Bridge服务器
-   */
+  /** Explicit connect starts a new session; stale timers and async loads cannot own it. */
   async connect(config: ConnectionConfig): Promise<void> {
+    this.disconnect()
+    const generation = this.generation
+    this.config = { ...config }
     const lib = await loadRoslib()
+    if (generation !== this.generation) throw new Error('连接已取消')
+    await this.openConnection(lib, generation)
+  }
+
+  private openConnection(lib: any, generation: number): Promise<void> {
     const Ros = lib.Ros || lib.default?.Ros
-
-    if (!Ros) {
-      throw new Error('无法加载 Ros 类: roslib 模块加载失败')
-    }
-
-    this.intentionalDisconnect = false
+    if (!Ros) return Promise.reject(new Error('无法加载 Ros 类'))
+    const ros = new Ros()
+    this.ros = ros
+    let established = false
+    let ended = false
+    const current = () => generation === this.generation && this.ros === ros
 
     return new Promise((resolve, reject) => {
-      // 设置连接超时（15秒）
-      const timeout = setTimeout(() => {
-        if (this.ros) {
-          this.ros.close()
-          this.ros = null
-        }
-        reject(new Error('连接超时：无法在15秒内连接到服务器，请检查网络和服务器状态'))
-      }, 15000)
-
-      this.ros = new Ros({
-        url: config.url
-      })
-
-      this.ros.on('connection', () => {
+      const timeout = setTimeout(() => fail(new Error('连接超时：无法在15秒内连接到服务器')), 15000)
+      const onMessage = () => { if (current()) this.lastReceivedAt = Date.now() }
+      const cleanup = () => {
         clearTimeout(timeout)
+        ros.socket?.removeEventListener('message', onMessage)
+        ros.removeAllListeners()
+        // ROSLIB emits error even for callbacks already queued by the old socket.
+        ros.on('error', () => {})
+        if (ros.socket) {
+          ros.socket.onopen = null
+          ros.socket.onclose = null
+          ros.socket.onerror = null
+          ros.socket.onmessage = null
+        }
+        // Detach before close: a late close must not affect the next attempt.
+        ros.close()
+      }
+      const fail = (error: Error, event?: { code?: number; reason?: string; wasClean?: boolean }) => {
+        if (ended || !current()) return
+        ended = true
+        const wasRecovering = this.reconnecting
+        this.stopHeartbeat()
+        this.cancelRequests()
+        this.ros = null
+        this.cancelAttempt = null
+        this.publishers.clear()
+        this.forEachSubscriber(entry => { entry.listener = null })
+        cleanup()
+        if ((established || wasRecovering) && this.config?.autoConnect !== false) {
+          this.reconnecting = true
+          this.scheduleReconnect(generation)
+        } else {
+          this.reconnecting = false
+        }
+        console.warn('[RosConnection] connection lost', {
+          time: new Date().toISOString(), code: event?.code,
+          reason: event?.reason || error.message, wasClean: event?.wasClean,
+          lastReceivedAt: this.lastReceivedAt, retryAttempt: this.reconnectAttempt
+        })
+        this.notifyConnectionChange(false)
+        if (established) this.notifyDisconnect()
+        reject(error)
+      }
+      this.cancelAttempt = () => {
+        ended = true
+        cleanup()
+        reject(new Error('连接已取消'))
+      }
+      ros.on('connection', () => {
+        if (!current() || ended || established) return
+        clearTimeout(timeout)
+        established = true
+        this.reconnecting = false
+        this.lastReceivedAt = null
+        this.heartbeatFailCount = 0
+        this.forEachSubscriber(entry => this.attachSubscriber(entry, lib, ros))
+        this.startHeartbeat()
         this.notifyConnectionChange(true)
-        // 延迟启动心跳检测，等待 ROS 服务完全就绪
-        setTimeout(() => {
-          this.startHeartbeat()
-        }, this.HEARTBEAT_START_DELAY)
         resolve()
       })
-
-      this.ros.on('error', (error: any) => {
-        clearTimeout(timeout)
-        this.stopHeartbeat()
-        console.error('ROS connection error:', error)
-        this.notifyConnectionChange(false)
-
-        // WebSocket 错误事件返回的是 Event 对象，需要提取详细信息
-        let errorMessage = 'WebSocket 连接失败：无法连接到服务器'
-
-        if (error instanceof Error) {
-          errorMessage = error.message
-        } else if (error && typeof error === 'object') {
-          // 尝试从WebSocket对象获取更多信息
-          const ws = error.target || error.currentTarget
-          if (ws && ws.readyState !== undefined) {
-            // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
-            if (ws.readyState === 3) {
-              errorMessage = `WebSocket 连接失败：连接已关闭 (readyState: ${ws.readyState})`
-            } else {
-              errorMessage = `WebSocket 连接失败：连接状态异常 (readyState: ${ws.readyState})`
-            }
-          }
-
-          // 检查是否有URL信息
-          if (ws && ws.url) {
-            const url = new URL(ws.url)
-            errorMessage += `\n\n连接地址: ${url.hostname}:${url.port || '默认端口'}`
-            errorMessage += `\n\n可能的原因：`
-            errorMessage += `\n1. rosbridge_server 未运行（检查: rosrun rosbridge_server rosbridge_websocket.py）`
-            errorMessage += `\n2. 端口不正确（默认端口是 9090，当前使用: ${url.port || '9090'}）`
-            errorMessage += `\n3. 防火墙阻止了连接`
-            errorMessage += `\n4. 网络不通（尝试 ping ${url.hostname}）`
-            errorMessage += `\n5. 服务器地址错误`
-          }
-        }
-
-        reject(new Error(errorMessage))
-      })
-
-      this.ros.on('close', () => {
-        clearTimeout(timeout)
-        this.stopHeartbeat()
-
-        // Clear publishers and subscribers as they are bound to the closed connection
-        this.subscribers.clear()
-        this.publishers.clear()
-
-        this.notifyConnectionChange(false)
-        if (!this.intentionalDisconnect) {
-          this.notifyDisconnect()
-        }
-      })
+      ros.on('close', (event: any) => fail(new Error('WebSocket 连接已断开'), event))
+      ros.on('error', (error: unknown) => fail(
+        error instanceof Error ? error : new Error('WebSocket 连接失败，请检查网络和机器狗服务')
+      ))
+      try {
+        ros.connect(this.config!.url)
+        ros.socket?.addEventListener('message', onMessage)
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)))
+      }
     })
   }
 
-  /**
-   * 断开ROS连接
-   */
+  private scheduleReconnect(generation: number): void {
+    if (this.reconnectTimer !== null || generation !== this.generation) return
+    const base = Math.min(1000 * 2 ** Math.min(this.reconnectAttempt++, 5), 30000)
+    const delay = Math.min(30000, Math.round(base * (0.8 + Math.random() * 0.4)))
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      if (generation !== this.generation || !this.reconnecting) return
+      // The library is cached after a successful connection.
+      void this.openConnection(ROSLIB, generation).catch(() => { /* fail schedules the next attempt */ })
+    }, delay)
+  }
+
+  isReconnecting(): boolean {
+    return this.reconnecting
+  }
+
   disconnect(): void {
-    this.intentionalDisconnect = true
+    ++this.generation
+    this.config = null
+    this.reconnecting = false
+    this.reconnectAttempt = 0
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
     this.stopHeartbeat()
-    if (this.ros) {
-      // 清理所有订阅
-      this.subscribers.forEach((entry) => entry.listener.unsubscribe())
-      this.subscribers.clear()
-
-      // 清理所有发布者
-      this.publishers.clear()
-
-      this.ros.close()
-      this.ros = null
-    }
-  }
-
-  /**
-   * 启动心跳检测
-   */
-  private startHeartbeat() {
-    this.stopHeartbeat()
-    this.heartbeatFailCount = 0
-
-    // 初始检查页面可见性
-    if (typeof document !== 'undefined' && document.hidden) {
-      this.heartbeatPaused = true
-      console.debug('[Heartbeat] 页面不可见，初始状态为暂停')
-    } else {
-      this.heartbeatPaused = false
-    }
-
-    this.heartbeatTimer = setInterval(() => {
-      // 如果心跳已暂停，跳过本次检测
-      if (this.heartbeatPaused) {
-        return
-      }
-
-      if (!this.ros || !this.ros.isConnected) {
-        this.stopHeartbeat()
-        return
-      }
-
-      // 记录当前是否暂停状态，用于在异步回调中检查
-      const wasPaused = this.heartbeatPaused
-
-      // 使用更轻量的心跳检测方法：检查 WebSocket 连接状态
-      // 如果 WebSocket 连接正常，就认为心跳成功
-      // 这样可以避免依赖可能不可用的 ROS 服务
-      const checkConnection = () => {
-        if (!this.ros || !this.ros.isConnected) {
-          return false
-        }
-        // 检查 WebSocket 的 readyState
-        // 1 = OPEN, 0 = CONNECTING, 2 = CLOSING, 3 = CLOSED
-        const ws = (this.ros as any).socket
-        if (ws && ws.readyState === 1) {
-          return true
-        }
-        return false
-      }
-
-      // 如果 WebSocket 连接正常，直接认为心跳成功
-      if (checkConnection()) {
-        if (!this.heartbeatPaused && !wasPaused) {
-          this.heartbeatFailCount = 0
-        }
-        return
-      }
-
-      // 如果 WebSocket 连接异常，尝试使用 getNodes 作为备用检测
-      // 设置超时 Promise
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Heartbeat timeout')), this.HEARTBEAT_TIMEOUT)
-      })
-
-      // 执行心跳检查
-      Promise.race([
-        new Promise((resolve, reject) => {
-          // 再次检查是否暂停（可能在设置 Promise 后暂停了）
-          if (this.heartbeatPaused) {
-            resolve(null) // 如果已暂停，直接成功，不执行实际请求
-            return
-          }
-          // 再次检查 WebSocket 连接
-          if (checkConnection()) {
-            resolve(null)
-            return
-          }
-          // 如果 WebSocket 连接异常，尝试使用 getNodes
-          try {
-            this.ros.getNodes(resolve, reject)
-          } catch (error) {
-            reject(error)
-          }
-        }),
-        timeoutPromise
-      ])
-        .then(() => {
-          // 心跳成功，重置失败计数（但只有在未暂停时才重置）
-          if (!this.heartbeatPaused && !wasPaused) {
-            this.heartbeatFailCount = 0
-          }
-        })
-        .catch(() => {
-          // 心跳失败（但如果心跳已暂停，不增加失败计数）
-          // 需要检查暂停状态，因为可能在请求过程中暂停了
-          if (!this.heartbeatPaused && !wasPaused) {
-            this.heartbeatFailCount++
-            console.warn(`[Heartbeat] 心跳失败 (${this.heartbeatFailCount}/${this.MAX_HEARTBEAT_FAILURES})`)
-            if (this.heartbeatFailCount >= this.MAX_HEARTBEAT_FAILURES) {
-              console.warn('[Heartbeat] 心跳失败太多次，关闭连接')
-              this.stopHeartbeat()
-              // 触发断连逻辑
-              if (this.ros) {
-                this.ros.close()
-              }
-            }
-          } else {
-            // 如果已暂停，忽略错误
-            console.log('[Heartbeat] 心跳已暂停，忽略失败')
-          }
-        })
-    }, this.HEARTBEAT_INTERVAL)
-  }
-
-  /**
-   * 停止心跳检测
-   */
-  private stopHeartbeat() {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer)
-      this.heartbeatTimer = null
-    }
+    this.cancelRequests()
+    this.cancelAttempt?.()
+    this.cancelAttempt = null
+    this.ros = null
+    this.forEachSubscriber(entry => {
+      entry.listener = null
+      entry.callbacks.clear()
+    })
+    this.subscribers.clear()
+    this.debugSubscribers.clear()
+    this.publishers.clear()
     this.heartbeatPaused = false
+    this.notifyConnectionChange(false)
   }
 
-  /**
-   * 暂停心跳检测（用于文件传输等长时间操作）
-   */
-  pauseHeartbeat(): void {
-    if (!this.heartbeatPaused) {
-      this.heartbeatPaused = true
-      // 重置失败计数，避免在暂停期间累积失败
-      this.heartbeatFailCount = 0
-      console.debug('[Heartbeat] 心跳检测已暂停')
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setTimeout(() => this.probeHeartbeat(), this.HEARTBEAT_INTERVAL)
+  }
+
+  /** A real rosbridge request detects half-open connections. One probe at a time. */
+  private probeHeartbeat(): void {
+    this.heartbeatTimer = null
+    const ros = this.ros
+    if (!ros || this.cancelProbe) return
+    if (!this.isConnected()) {
+      ros.emit('error', new Error('WebSocket 连接状态异常'))
+      return
     }
-  }
-
-  /**
-   * 恢复心跳检测
-   */
-  resumeHeartbeat(): void {
-    if (this.heartbeatPaused) {
-      this.heartbeatPaused = false
-      // 重置失败计数，重新开始检测
-      this.heartbeatFailCount = 0
-      console.debug('[Heartbeat] 心跳检测已恢复')
+    // Long transfers pause failure judgement, while keepalive traffic continues.
+    const startedAt = Date.now()
+    const id = `call_service:/rosapi/nodes:heartbeat:${++ros.idCounter}`
+    let done = false
+    const cleanup = () => {
+      clearTimeout(timeout)
+      ros.off(id, onReply)
+      this.cancelProbe = null
     }
-  }
-
-  /**
-   * 检查是否已连接
-   */
-  isConnected(): boolean {
-    return this.ros !== null && this.ros.isConnected
-  }
-
-  /**
-   * 订阅话题
-   */
-  async subscribe(subscription: TopicSubscription): Promise<void> {
-    if (!this.ros) {
-      throw new Error('Not connected to ROS')
-    }
-
-    const lib = await loadRoslib()
-    const subscriptionKey = subscription.key || 'default'
-    let entry = this.subscribers.get(subscription.topic)
-
-    if (!entry) {
-      const listener = new lib.Topic({
-        ros: this.ros,
-        name: subscription.topic,
-        messageType: subscription.messageType,
-        throttle_rate: subscription.throttleRate ?? 200,
-        queue_length: 1,
-        compression: subscription.compression || 'none'
-      })
-
-      entry = {
-        listener,
-        callbacks: new Map()
+    const finish = (alive: boolean) => {
+      if (done) return
+      done = true
+      cleanup()
+      if (this.ros !== ros) return
+      // A service error reply still proves the transport is alive. Other incoming
+      // messages also prove liveness if rosapi is unavailable on this robot.
+      if (alive || (this.lastReceivedAt !== null && this.lastReceivedAt >= startedAt)) {
+        this.heartbeatFailCount = 0
+        this.reconnectAttempt = 0
+      } else if (!this.heartbeatPaused && !(typeof document !== 'undefined' && document.hidden)) {
+        this.heartbeatFailCount++
+        console.warn(`[RosConnection] heartbeat timeout (${this.heartbeatFailCount}/${this.MAX_HEARTBEAT_FAILURES})`)
+        if (this.heartbeatFailCount >= this.MAX_HEARTBEAT_FAILURES) {
+          // Use the normal failure path even if WebSocket never emits close.
+          ros.emit('error', new Error('心跳响应超时'))
+          return
+        }
       }
+      this.startHeartbeat()
+    }
+    const onReply = () => finish(true)
+    const timeout = setTimeout(() => finish(false), this.HEARTBEAT_TIMEOUT)
+    this.cancelProbe = () => { done = true; cleanup() }
+    ros.once(id, onReply)
+    try {
+      ros.callOnConnection({ op: 'call_service', id, service: '/rosapi/nodes', type: 'rosapi/Nodes', args: {} })
+    } catch {
+      finish(false)
+    }
+  }
 
-      listener.subscribe((message: RosMessage) => {
-        entry?.callbacks.forEach((callback) => callback(message))
-      })
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer !== null) clearTimeout(this.heartbeatTimer)
+    this.heartbeatTimer = null
+    this.cancelProbe?.()
+  }
 
+  private checkNow(): void {
+    if (this.isConnected()) {
+      this.stopHeartbeat()
+      this.probeHeartbeat()
+    } else if (this.reconnecting && this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+      void this.openConnection(ROSLIB, this.generation).catch(() => {})
+    }
+  }
+
+  pauseHeartbeat(): void {
+    this.heartbeatPaused = true
+    this.heartbeatFailCount = 0
+    this.stopHeartbeat()
+    this.startHeartbeat()
+  }
+
+  resumeHeartbeat(): void {
+    this.heartbeatPaused = false
+    this.heartbeatFailCount = 0
+    this.checkNow()
+  }
+
+  isConnected(): boolean {
+    return this.ros !== null && this.ros.isConnected && this.ros.socket?.readyState === 1
+  }
+
+  private requireConnection(expected = this.ros): any {
+    if (!expected || expected !== this.ros || !this.isConnected()) {
+      throw new Error('连接已断开，指令未发送，请在恢复连接后重试')
+    }
+    return expected
+  }
+
+  private forEachSubscriber(callback: (entry: SubscriberEntry) => void): void {
+    this.subscribers.forEach(callback)
+    this.debugSubscribers.forEach(callback)
+  }
+
+  private attachSubscriber(entry: SubscriberEntry, lib: any, ros: any): void {
+    const listener = new lib.Topic({
+      ros, name: entry.config.topic, messageType: entry.config.messageType,
+      throttle_rate: entry.config.throttleRate ?? 200,
+      queue_length: 1, compression: entry.config.compression || 'none'
+    })
+    entry.listener = listener
+    listener.subscribe((message: RosMessage) => {
+      if (this.ros !== ros || entry.listener !== listener) return
+      entry.callbacks.forEach(callback => callback(message))
+    })
+  }
+
+  async subscribe(subscription: TopicSubscription): Promise<void> {
+    const ros = this.requireConnection()
+    const key = subscription.key || 'default'
+    let entry = this.subscribers.get(subscription.topic)
+    if (!entry) {
+      entry = { listener: null, config: { ...subscription }, callbacks: new Map() }
       this.subscribers.set(subscription.topic, entry)
     }
-
-    entry.callbacks.set(subscriptionKey, subscription.callback)
+    // Reserve ownership before awaiting: unsubscribe/unmount must be able to
+    // cancel a registration even while the library promise is still pending.
+    entry.callbacks.set(key, subscription.callback)
+    const lib = await loadRoslib()
+    if (this.subscribers.get(subscription.topic) !== entry || !entry.callbacks.has(key)) return
+    this.requireConnection(ros)
+    if (!entry.listener) this.attachSubscriber(entry, lib, ros)
   }
 
-  /**
-   * 取消订阅话题
-   */
   unsubscribe(topic: string, key?: string): void {
     const entry = this.subscribers.get(topic)
     if (!entry) return
-
     if (key) {
       entry.callbacks.delete(key)
       if (entry.callbacks.size > 0) return
     }
-
-    if (!key) {
-      entry.callbacks.clear()
-    }
-
-    if (entry.callbacks.size === 0) {
-      entry.listener.unsubscribe()
-      this.subscribers.delete(topic)
-    }
+    if (entry.listener && this.isConnected()) entry.listener.unsubscribe()
+    entry.callbacks.clear()
+    this.subscribers.delete(topic)
   }
 
-  /**
-   * 创建独立调试订阅，不占用业务订阅表。
-   * 用于控制台调试面板同时监听话题，避免覆盖页面已有订阅。
-   */
   async createDebugSubscription(subscription: TopicSubscription): Promise<() => void> {
-    if (!this.ros) {
-      throw new Error('Not connected to ROS')
-    }
-
+    const ros = this.requireConnection()
     const lib = await loadRoslib()
-    const listener = new lib.Topic({
-      ros: this.ros,
-      name: subscription.topic,
-      messageType: subscription.messageType,
-      throttle_rate: subscription.throttleRate ?? 200,
-      queue_length: 1,
-      compression: subscription.compression || 'none'
-    })
-
-    listener.subscribe((message: RosMessage) => {
-      subscription.callback(message)
-    })
-
+    this.requireConnection(ros)
+    const entry: SubscriberEntry = {
+      listener: null, config: { ...subscription },
+      callbacks: new Map([['debug', subscription.callback]])
+    }
+    this.debugSubscribers.add(entry)
+    this.attachSubscriber(entry, lib, ros)
     return () => {
-      listener.unsubscribe()
+      if (entry.listener && this.isConnected()) entry.listener.unsubscribe()
+      entry.callbacks.clear()
+      this.debugSubscribers.delete(entry)
     }
   }
 
@@ -434,17 +385,15 @@ class RosConnection {
    * 发布消息到话题
    */
   async publish(topic: string, messageType: string, message: RosMessage): Promise<void> {
-    if (!this.ros) {
-      throw new Error('Not connected to ROS')
-    }
-
+    const ros = this.requireConnection()
     const lib = await loadRoslib()
+    this.requireConnection(ros)
 
     // 获取或创建发布者
     let publisher = this.publishers.get(topic)
     if (!publisher) {
       publisher = new lib.Topic({
-        ros: this.ros,
+        ros,
         name: topic,
         messageType: messageType
       })
@@ -455,108 +404,73 @@ class RosConnection {
     publisher.publish(rosMessage)
   }
 
-  /**
-   * 获取可用话题列表
-   * @param retries 重试次数，默认为2
-   * @param timeoutMs 单次超时时间（毫秒），默认为10000
-   */
+  /** Read-only discovery retries remain bound to the connection that requested them. */
   async getTopics(retries = 2, timeoutMs = 10000): Promise<RosTopic[]> {
-    if (!this.ros) {
-      throw new Error('Not connected to ROS')
-    }
-
-    let lastError: Error | null = null
-
-    for (let attempt = 0; attempt <= retries; attempt++) {
+    const ros = this.requireConnection()
+    for (let attempt = 0; ; attempt++) {
+      this.requireConnection(ros)
       try {
-        return await new Promise<RosTopic[]>((resolve, reject) => {
-          // 设置超时，避免长时间等待
-          const timeout = setTimeout(() => {
-            reject(new Error(`获取话题列表超时 (尝试 ${attempt + 1}/${retries + 1})`))
-          }, timeoutMs)
-
-          try {
-            this.ros.getTopics(
-              (result: any) => {
-                clearTimeout(timeout)
-                if (result && result.topics && Array.isArray(result.topics)) {
-                  const topics: RosTopic[] = result.topics.map((name: string, index: number) => ({
-                    name,
-                    messageType: result.types && result.types[index] ? result.types[index] : 'unknown'
-                  }))
-                  resolve(topics)
-                } else {
-                  reject(new Error('无效的话题列表响应'))
-                }
-              },
-              (error: Error) => {
-                clearTimeout(timeout)
-                // 如果错误信息包含服务不存在，提供更友好的错误信息
-                const errorMsg = error.message || String(error)
-                if (errorMsg.includes('does not exist') || errorMsg.includes('Service')) {
-                  reject(new Error('ROS API 服务不可用，请确保 rosbridge 服务正常运行'))
-                } else {
-                  reject(error)
-                }
-              }
-            )
-          } catch (error) {
-            clearTimeout(timeout)
-            reject(error)
-          }
-        })
+        const result = await this.requestService(ros, '/rosapi/topics', 'rosapi/Topics', {}, timeoutMs)
+        if (!Array.isArray(result.topics)) throw new Error('无效的话题列表响应')
+        return result.topics.map((name: string, index: number) => ({
+          name, messageType: result.types?.[index] || 'unknown'
+        }))
       } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error))
-        console.warn(`[RosConnection] 获取话题列表失败 (尝试 ${attempt + 1}/${retries + 1}):`, lastError.message)
-
-        // 如果是最后一次尝试，则抛出错误
-        if (attempt === retries) {
-          throw lastError
-        }
-
-        // 计算重试等待时间 (递增策略: 1s -> 2s -> 5s...)
-        const delay = attempt === 0 ? 1000 : (attempt === 1 ? 2000 : 5000)
-        console.log(`[RosConnection] 等待 ${delay}ms 后重试...`)
-        await new Promise(resolve => setTimeout(resolve, delay))
+        this.requireConnection(ros)
+        if (attempt >= retries) throw error
+        await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 1000 : 2000))
       }
     }
-
-    throw lastError || new Error('获取话题列表失败')
   }
 
-  /**
-   * 调用服务
-   */
+  /** Commands are sent once, never queued or retried. Callers can extend long service timeouts. */
   async callService(
     serviceName: string,
     serviceType: string,
-    request: RosMessage
+    request: RosMessage,
+    timeoutMs = 30000
   ): Promise<RosMessage> {
-    if (!this.ros) {
-      throw new Error('Not connected to ROS')
-    }
+    const ros = this.requireConnection()
+    return this.requestService(ros, serviceName, serviceType, request, timeoutMs)
+  }
 
-    const lib = await loadRoslib()
-
+  private requestService(
+    ros: any, service: string, type: string, args: RosMessage, timeoutMs: number
+  ): Promise<RosMessage> {
+    this.requireConnection(ros)
     return new Promise((resolve, reject) => {
-      const service = new lib.Service({
-        ros: this.ros,
-        name: serviceName,
-        serviceType: serviceType
-      })
-
-      const serviceRequest = new lib.ServiceRequest(request)
-
-      service.callService(
-        serviceRequest,
-        (response: RosMessage) => {
-          resolve(response)
-        },
-        (error: Error) => {
-          reject(error)
-        }
-      )
+      const id = `call_service:${service}:${++ros.idCounter}`
+      const cleanup = () => {
+        clearTimeout(timeout)
+        ros.off(id, onReply)
+        this.pendingRequests.delete(cancel)
+      }
+      const cancel = () => {
+        cleanup()
+        reject(new Error('连接已断开，服务请求已取消'))
+      }
+      const onReply = (message: any) => {
+        cleanup()
+        if (message.result === false) reject(new Error(String(message.values || '服务调用失败')))
+        else resolve(message.values)
+      }
+      const timeout = setTimeout(() => {
+        cleanup()
+        reject(new Error(`服务响应超时: ${service}`))
+      }, timeoutMs)
+      this.pendingRequests.add(cancel)
+      ros.once(id, onReply)
+      try {
+        ros.callOnConnection({ op: 'call_service', id, service, type, args })
+      } catch (error) {
+        cleanup()
+        reject(error)
+      }
     })
+  }
+
+  private cancelRequests(): void {
+    this.pendingRequests.forEach(cancel => cancel())
   }
 
   /**

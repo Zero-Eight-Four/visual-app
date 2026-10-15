@@ -911,6 +911,12 @@ import { weatherService } from '@/services/weatherService'
 
 const settingsStore = use3DSettingsStore()
 const rosStore = useRosStore()
+let navigationPanelDisposed = false
+const subscribeForNavigation = (subscription: Parameters<typeof rosConnection.subscribe>[0]) => {
+    if (navigationPanelDisposed) return Promise.resolve()
+    return rosConnection.subscribe(subscription)
+}
+
 const queueName = ref('')
 
 // Inject ImagePanel reference
@@ -1325,12 +1331,17 @@ const startMove = (direction: string) => {
     }, 100)
 }
 
-const stopMove = () => {
-    if (moveInterval.value) {
+const cancelManualMovement = () => {
+    if (moveInterval.value !== null) {
         clearInterval(moveInterval.value)
         moveInterval.value = null
     }
-    
+}
+
+const stopMove = () => {
+    cancelManualMovement()
+    if (!rosConnection.isConnected()) return
+
     // 发送停止指令
     const stopTwist = {
         linear: { x: 0, y: 0, z: 0 },
@@ -1483,7 +1494,7 @@ const subscribeToNavigationStatus = async () => {
     }
 
     try {
-        await rosConnection.subscribe({
+        await subscribeForNavigation({
             topic: '/launch_trigger_status',
             messageType: 'std_msgs/String',
             callback: (message: any) => {
@@ -1581,7 +1592,7 @@ const subscribeToMapManagerStatus = async () => {
     }
 
     try {
-        await rosConnection.subscribe({
+        await subscribeForNavigation({
             topic: '/map_manager/status',
             messageType: 'std_msgs/String',
             callback: (message: any) => {
@@ -1589,7 +1600,7 @@ const subscribeToMapManagerStatus = async () => {
             }
         })
 
-        await rosConnection.subscribe({
+        await subscribeForNavigation({
             topic: '/map_manager/result',
             messageType: 'std_msgs/String',
             callback: (message: any) => {
@@ -1917,7 +1928,7 @@ const subscribeToTaskStatus = async () => {
 // 订阅命令话题（用于监听外部启动/停止命令）
 const subscribeToCommandTopics = async () => {
     try {
-        await rosConnection.subscribe({
+        await subscribeForNavigation({
             topic: '/goal_queue/start',
             messageType: 'std_msgs/Empty',
             callback: () => {
@@ -1926,7 +1937,7 @@ const subscribeToCommandTopics = async () => {
             }
         })
         
-        await rosConnection.subscribe({
+        await subscribeForNavigation({
             topic: '/goal_queue/stop',
             key: 'three-d-settings-image-capture-stop',
             messageType: 'std_msgs/Empty',
@@ -1951,7 +1962,7 @@ const subscribeToQueueList = async () => {
             queueListSubscription = null
         }
 
-        await rosConnection.subscribe({
+        await subscribeForNavigation({
             topic: '/goal_queue/list',
             messageType: 'std_msgs/String',
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2070,13 +2081,16 @@ const confirmDeleteNamed = async () => {
     }
 }
 
-// 监听导航状态变化，成功启动后自动刷新任务队列列表
+let queueRefreshTimer: ReturnType<typeof setTimeout> | null = null
+
+// Refresh data after navigation starts; an old session must not refresh a new one.
 watch(isNavigationRunning, (newValue, oldValue) => {
-    // 当导航从停止状态变为运行状态时（成功启动），自动刷新任务队列列表
+    if (queueRefreshTimer !== null) clearTimeout(queueRefreshTimer)
+    queueRefreshTimer = null
     if (newValue === true && oldValue === false) {
-        // 延迟刷新，等待导航系统完全启动（延长等待时间）
-        setTimeout(() => {
-            refreshQueueList()
+        queueRefreshTimer = setTimeout(() => {
+            queueRefreshTimer = null
+            if (rosConnection.isConnected() && isNavigationRunning.value) refreshQueueList()
         }, 15000)
     }
 })
@@ -2087,18 +2101,21 @@ watch(queueName, (name) => {
 })
 
 // 监听 ROS 连接状态，连接成功后订阅导航状态话题和任务状态
-watch(() => rosStore.isConnected, (connected) => {
+watch([() => rosStore.isConnected, () => rosStore.connectionState.reconnecting], ([connected]) => {
     if (connected) {
-        // 延迟订阅，等待话题列表更新
-        setTimeout(() => {
-            subscribeToNavigationStatus()
-            subscribeToMapManagerStatus()
-            subscribeToTaskStatus()
-            subscribeToCommandTopics()
-            // 自动订阅队列列表（后端会定期发布，使用 latch=true）
-            subscribeToQueueList()
-        }, 1000)
+        // Register immediately: these types are known and do not require topic discovery.
+        subscribeToNavigationStatus()
+        subscribeToMapManagerStatus()
+        subscribeToTaskStatus()
+        subscribeToCommandTopics()
+        subscribeToQueueList()
     } else {
+        cancelManualMovement()
+        if (queueRefreshTimer !== null) clearTimeout(queueRefreshTimer)
+        queueRefreshTimer = null
+        // Keep the last known display and subscription ownership during recovery.
+        // Controls remain disabled until the connection is restored.
+        if (rosConnection.isReconnecting()) return
         // 断开连接时取消订阅
         rosConnection.unsubscribe('/launch_trigger_status')
         rosConnection.unsubscribe('/map_manager/status')
@@ -2122,7 +2139,7 @@ watch(() => rosStore.isConnected, (connected) => {
         mapManagerStatusText.value = ''
         mapManagerResultText.value = ''
     }
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 
 // 监听 ThreeDPanel 的发布事件
 onMounted(() => {
@@ -2130,22 +2147,15 @@ onMounted(() => {
         threeDPanelRef.value.setOnPosePublishedCallback(handlePosePublished)
     }
 
-    // 如果已经连接，立即订阅状态话题并设置默认循环模式
-    if (rosStore.isConnected) {
-        setTimeout(() => {
-            subscribeToNavigationStatus()
-            subscribeToMapManagerStatus()
-            subscribeToTaskStatus()
-            subscribeToCommandTopics()
-            // 设置默认循环模式为单次执行（0）
-            rosConnection.publish('/goal_queue/set_loop_count', 'std_msgs/Int32', { data: 0 }).catch(() => {
-                // 静默失败，不影响其他初始化
-            })
-        }, 1000)
-    }
+    // The immediate connection watcher owns subscriptions. Mounting a view must
+    // not change the robot's existing loop mode or restart a task.
 })
 
 onUnmounted(() => {
+    navigationPanelDisposed = true
+    cancelManualMovement()
+    if (queueRefreshTimer !== null) clearTimeout(queueRefreshTimer)
+    queueRefreshTimer = null
     // 取消队列列表订阅
     if (queueListSubscription) {
         rosConnection.unsubscribe('/goal_queue/list')

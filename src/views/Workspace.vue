@@ -249,7 +249,8 @@ const disconnectTime = ref('')
 
 // 断连回调函数
 const handleDisconnect = () => {
-    // 仅在意外断连时触发（由 rosConnection.ts 的 intentionalDisconnect 标志控制）
+    // 自动恢复期间由顶栏显示状态，避免每次短暂抖动都弹出阻塞对话框。
+    if (rosConnection.isReconnecting()) return
     const now = new Date()
     disconnectTime.value = now.toLocaleString('zh-CN')
     disconnectWarningVisible.value = true

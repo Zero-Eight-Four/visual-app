@@ -16,6 +16,8 @@
     <div
       v-else
       class="status-indicator"
+      role="status"
+      aria-live="polite"
       :class="statusClass"
     >
       <span class="dot" />
@@ -55,7 +57,7 @@
     </el-button>
         
     <el-button 
-      v-if="!isConnected" 
+      v-if="!isConnected && !isReconnecting"
       type="primary" 
       size="small" 
       :loading="isConnecting" 
@@ -70,7 +72,7 @@
       size="small" 
       @click="handleDisconnect"
     >
-      断开
+      {{ isReconnecting ? '取消重连' : '断开' }}
     </el-button>
   </div>
     
@@ -103,6 +105,7 @@ let historyWatchInterval: number | null = null
 
 const isConnected = computed(() => rosStore.isConnected)
 const isConnecting = computed(() => rosStore.connectionState.connecting)
+const isReconnecting = computed(() => rosStore.connectionState.reconnecting)
 
 const statusClass = computed(() => {
     if (isConnected.value) return 'connected'
@@ -112,6 +115,7 @@ const statusClass = computed(() => {
 
 const statusText = computed(() => {
     if (isConnected.value) return '已连接'
+    if (isReconnecting.value) return '重连中'
     if (isConnecting.value) return '连接中'
     return '未连接'
 })

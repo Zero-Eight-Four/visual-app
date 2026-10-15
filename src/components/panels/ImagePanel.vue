@@ -330,6 +330,31 @@ const handleImageMessage = (message: RosMessage) => {
 const isAutoCapturing = computed(() => rosStore.isAutoCapturing)
 let captureSessionId = 0
 
+const cancelAutoCaptureOnDisconnect = () => {
+    ++captureSessionId
+    if (!rosStore.isAutoCapturing) return
+    rosStore.setAutoCapturing(false)
+    ElMessage.warning('连接中断，自动采集已停止，请确认后再继续任务')
+}
+
+
+const publishPtzCommand = async (command: string) => {
+    const topicMap: Record<string, string> = {
+        rotate_up: '/camera_control/tilt_up',
+        rotate_down: '/camera_control/tilt_down',
+        rotate_left: '/camera_control/continuous_pan_left',
+        rotate_right: '/camera_control/continuous_pan_right',
+        center: '/camera_control/center',
+        stop: '/camera_control/stop'
+    }
+    const topic = topicMap[command]
+    if (!topic || !rosConnection.isConnected()) return
+
+    await rosConnection.publish(topic, 'std_msgs/Empty', {})
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
 const uploadCurrentFrame = async (folderName: string) => {
     const canvas = imageCanvas.value
     if (!canvas || !hasImage.value) {
@@ -360,8 +385,60 @@ const uploadCurrentFrame = async (folderName: string) => {
     }
 }
 
+const runThreeLevelScan = async (sessionId: number) => {
+    const SETTLE_MS = 1000
+    const TILT_PULSE_MS = 2000
+    const PAN_HALF_WIDTH_MS = 5000
+    const PAN_FULL_WIDTH_MS = PAN_HALF_WIDTH_MS * 2
+    const isCurrentSession = () => isAutoCapturing.value && captureSessionId === sessionId && rosConnection.isConnected()
+
+    const runPan = async (command: 'rotate_left' | 'rotate_right', duration: number) => {
+        if (!isCurrentSession()) return false
+        await publishPtzCommand(command)
+        await sleep(duration)
+        if (!isCurrentSession()) return false
+        await publishPtzCommand('stop')
+        if (!isCurrentSession()) return false
+        await sleep(SETTLE_MS)
+        return isCurrentSession()
+    }
+
+    const pulseTilt = async (command: 'rotate_up' | 'rotate_down', count: number) => {
+        for (let i = 0; i < count; i += 1) {
+            if (!isCurrentSession()) return false
+            await publishPtzCommand(command)
+            await sleep(TILT_PULSE_MS)
+            if (!isCurrentSession()) return false
+            await publishPtzCommand('stop')
+            if (!isCurrentSession()) return false
+            await sleep(SETTLE_MS)
+        }
+        return isCurrentSession()
+    }
+
+    // 从中心移动到左上，依次扫描上层、中层、下层。
+    if (!await pulseTilt('rotate_up', 2)) return
+    if (!await runPan('rotate_left', PAN_HALF_WIDTH_MS)) return
+    if (!await runPan('rotate_right', PAN_FULL_WIDTH_MS)) return
+    if (!await pulseTilt('rotate_down', 2)) return
+    if (!await runPan('rotate_left', PAN_FULL_WIDTH_MS)) return
+    if (!await pulseTilt('rotate_down', 2)) return
+    await runPan('rotate_right', PAN_FULL_WIDTH_MS)
+}
+
 const stopAutoCapture = async (succeeded: boolean) => {
-    captureSessionId += 1
+    const stoppingSession = ++captureSessionId
+
+    // 扫描完成或异常退出时，先停止，再明确发送居中指令。
+    try {
+        await publishPtzCommand('stop')
+        if (captureSessionId !== stoppingSession || !rosConnection.isConnected()) return
+        await publishPtzCommand('center')
+    } catch (error) {
+        console.error('Failed to center PTZ:', error)
+    }
+
+    if (captureSessionId !== stoppingSession || !rosConnection.isConnected()) return
     rosStore.setAutoCapturing(false)
 
     // 图片上传结束后继续导航。
@@ -381,17 +458,36 @@ const startAutoCapture = async (folderName: string) => {
     rosStore.setAutoCapturing(true, folderName)
     ElMessage.info(`开始自动采集任务: ${folderName}`)
 
-    // 按摄像头当前朝向采集一张图片，不控制云台移动。
     let succeeded = false
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+    const captureFrames = async () => {
+        while (isAutoCapturing.value && captureSessionId === sessionId) {
+            try {
+                await uploadCurrentFrame(folderName)
+            } catch (error) {
+                console.error('Capture frame failed:', error)
+            }
+            await sleep(1000)
+        }
+    }
+
     try {
+        const capturePromise = captureFrames()
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutTimer = setTimeout(() => reject(new Error('三层扫描超时')), 90000)
+        })
+        await Promise.race([runThreeLevelScan(sessionId), timeoutPromise])
+        if (captureSessionId !== sessionId || !rosConnection.isConnected()) return
         await uploadCurrentFrame(folderName)
         succeeded = true
+        void capturePromise
     } catch (error) {
         console.error('Auto capture failed:', error)
         if (captureSessionId === sessionId) {
             ElMessage.error(error instanceof Error ? error.message : '自动采集图片失败')
         }
     } finally {
+        if (timeoutTimer) clearTimeout(timeoutTimer)
         if (captureSessionId === sessionId) {
             await stopAutoCapture(succeeded)
         }
@@ -418,6 +514,7 @@ const subscribeToTaskStatus = async () => {
     try {
         await rosConnection.subscribe({
             topic: '/goal_queue/task_status',
+            key: 'image-panel-task-status',
             messageType: 'std_msgs/Int32',
             callback: handleTaskStatusMessage
         })
@@ -495,25 +592,31 @@ const autoSubscribeDefaultCamera = async () => {
     }
 }
 
+let cameraSubscriptionVersion = 0
+
 // 监听 ROS 连接状态变化
-watch(() => rosStore.isConnected, async (connected) => {
+watch([() => rosStore.isConnected, () => rosStore.connectionState.reconnecting], async ([connected]) => {
     if (connected) {
         subscribeToTaskStatus()
-        // 只有当还没有选中话题时才自动订阅
-        if (!settingsStore.selectedTopic) {
+        if (settingsStore.selectedTopic) {
+            await subscribeToSelectedCamera()
+        } else {
             await autoSubscribeDefaultCamera()
         }
     } else {
+        cancelAutoCaptureOnDisconnect()
+        if (rosConnection.isReconnecting()) return
+        // 自动重连时保留摄像头选择，由连接模块恢复订阅。
         // 清理订阅
         if (selectedTopic.value) {
-            rosConnection.unsubscribe(selectedTopic.value)
+            rosConnection.unsubscribe(selectedTopic.value, 'image-panel-camera')
             selectedTopic.value = ''
             hasImage.value = false
         }
         // 清空store中的话题选择
         settingsStore.setSelectedTopic('')
     }
-})
+}, { flush: 'sync' })
 
 // 监听话题列表变化（当话题列表更新时尝试自动订阅）
 watch(() => rosStore.topics.length, async (newLength, oldLength) => {
@@ -523,44 +626,36 @@ watch(() => rosStore.topics.length, async (newLength, oldLength) => {
     }
 })
 
-// 监听话题变化
-watch(() => settingsStore.selectedTopic, async (newTopic, oldTopic) => {
-    // 取消旧订阅
-    if (oldTopic) {
-        rosConnection.unsubscribe(oldTopic)
+const subscribeToSelectedCamera = async () => {
+    const version = ++cameraSubscriptionVersion
+    const topic = settingsStore.selectedTopic
+    if (!topic || !rosConnection.isConnected()) return
+    try {
+        const topics = await rosConnection.getTopics()
+        if (version !== cameraSubscriptionVersion || settingsStore.selectedTopic !== topic || !rosConnection.isConnected()) return
+        const topicInfo = topics.find(t => t.name === topic)
+        if (!topicInfo) return
+        await rosConnection.subscribe({
+            topic,
+            key: 'image-panel-camera',
+            messageType: topicInfo.messageType,
+            callback: handleImageMessage
+        })
+    } catch (error) {
+        if (version === cameraSubscriptionVersion && rosConnection.isConnected()) {
+            console.error('Failed to subscribe to image topic:', error)
+        }
     }
+}
 
+// Selection may change offline or while discovery is in flight. Recovery always
+// reconciles the latest choice, and old discovery replies cannot re-subscribe it.
+watch(() => settingsStore.selectedTopic, async (newTopic, oldTopic) => {
+    ++cameraSubscriptionVersion
+    if (oldTopic) rosConnection.unsubscribe(oldTopic, 'image-panel-camera')
     selectedTopic.value = newTopic
     hasImage.value = false
-
-    // 订阅新话题
-    if (newTopic) {
-        // 检查是否已连接
-        if (!rosConnection.isConnected()) {
-            return
-        }
-
-        try {
-            // 获取话题的消息类型
-            const topics = await rosConnection.getTopics()
-            const topicInfo = topics.find(t => t.name === newTopic)
-
-            if (!topicInfo) {
-                console.error('Topic not found:', newTopic)
-                return
-            }
-
-            const messageType = topicInfo.messageType
-
-            await rosConnection.subscribe({
-                topic: newTopic,
-                messageType: messageType,
-                callback: handleImageMessage
-            })
-        } catch (err) {
-            console.error('Failed to subscribe to image topic:', err)
-        }
-    }
+    await subscribeToSelectedCamera()
 }, { immediate: true })
 
 // 定义 emits
@@ -600,11 +695,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+    ++cameraSubscriptionVersion
+    rosConnection.unsubscribe('/goal_queue/task_status', 'image-panel-task-status')
     // 使已卸载组件的采集任务失效，由新组件恢复未完成任务。
     captureSessionId += 1
 
     if (selectedTopic.value) {
-        rosConnection.unsubscribe(selectedTopic.value)
+        rosConnection.unsubscribe(selectedTopic.value, 'image-panel-camera')
     }
     if (lastBlobUrl && lastBlobUrl.startsWith('blob:')) {
         URL.revokeObjectURL(lastBlobUrl)

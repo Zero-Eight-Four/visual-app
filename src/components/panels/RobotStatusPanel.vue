@@ -541,49 +541,22 @@ const batteryColor = computed(() => {
     return '#f56c6c'
 })
 
-// 订阅状态话题
+let statusPanelDisposed = false
+
+// Unmount can happen between awaits, including while automatic recovery is pending.
 const subscribeToStatus = async () => {
-    if (!rosConnection.isConnected()) {
-        return
-    }
-
-    // 订阅宇树机器狗状态
-    try {
-        await rosConnection.subscribe({
-            topic: '/go2/status',
-            messageType: 'std_msgs/String',
-            callback: (message: RosMessage) => {
-                handleStatusMessage(message)
-            }
-        })
-    } catch (error) {
-        console.error('❌ 订阅/go2/status话题失败:', error)
-    }
-
-    // 订阅智身科技机器狗状态
-    try {
-        await rosConnection.subscribe({
-            topic: '/dog/status',
-            messageType: 'diagnostic_msgs/DiagnosticArray',
-            callback: (message: any) => {
-                handleDogStatusMessage(message)
-            }
-        })
-    } catch (error) {
-        console.error('❌ 订阅/dog/status话题失败:', error)
-    }
-
-    // 订阅 A2 状态
-    try {
-        await rosConnection.subscribe({
-            topic: '/a2/status',
-            messageType: 'std_msgs/String',
-            callback: (message: RosMessage) => {
-                handleStatusMessage(message)
-            }
-        })
-    } catch (error) {
-        console.error('❌ 订阅/a2/status话题失败:', error)
+    const subscriptions = [
+        { topic: '/go2/status', messageType: 'std_msgs/String', callback: handleStatusMessage },
+        { topic: '/dog/status', messageType: 'diagnostic_msgs/DiagnosticArray', callback: handleDogStatusMessage },
+        { topic: '/a2/status', messageType: 'std_msgs/String', callback: handleStatusMessage }
+    ]
+    for (const subscription of subscriptions) {
+        if (statusPanelDisposed || !rosConnection.isConnected()) return
+        try {
+            await rosConnection.subscribe({ ...subscription, key: 'robot-status-panel' })
+        } catch (error) {
+            console.error(`订阅 ${subscription.topic} 失败:`, error)
+        }
     }
 }
 
@@ -807,10 +780,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    if (rosConnection.isConnected()) {
-        rosConnection.unsubscribe('/go2/status')
-        rosConnection.unsubscribe('/dog/status')
-        rosConnection.unsubscribe('/a2/status')
+    statusPanelDisposed = true
+    for (const topic of ['/go2/status', '/dog/status', '/a2/status']) {
+        rosConnection.unsubscribe(topic, 'robot-status-panel')
     }
 })
 // Schedule Logic

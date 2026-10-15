@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:connection": "node --test --test-isolation=none tests/rosConnection.test.mjs",
     "dev": "vite",
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
